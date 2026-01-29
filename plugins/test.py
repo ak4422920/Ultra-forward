@@ -27,17 +27,16 @@ logger = logging.getLogger(__name__)
 BTN_URL_REGEX = re.compile(r"(\[([^\[]+?)]\[buttonurl:/{0,2}(.+?)(:same)?])")
 BOT_TOKEN_TEXT = "<b>1) Create a bot using @BotFather\n2) Then you will get a message with bot token\n3) Forward that message to me</b>"
 
-# ================= CONFIG HELPERS (Crucial for Settings.py) ================= #
+# ================= CONFIG HELPERS ================= #
 
 async def get_configs(user_id):
-    """Point #1: Fetching user configurations from database."""
+    """Database se user settings fetch karta hai."""
     return await db.get_configs(user_id)
 
 async def update_configs(user_id, key, value):
-    """Point #2: Centralized function to update specific user configurations."""
+    """User settings ko update karne ka centralized function."""
     current = await db.get_configs(user_id)
     
-    # List of keys that live in the root of the config dict
     root_keys = [
         'caption', 'duplicate', 'db_uri', 'forward_tag', 
         'protect', 'file_size', 'size_limit', 'extension', 
@@ -47,41 +46,45 @@ async def update_configs(user_id, key, value):
     if key in root_keys:
         current[key] = value
     else: 
-        # If not in root, it's a filter setting inside the 'filters' sub-dict
         if 'filters' not in current:
             current['filters'] = {}
         current['filters'][key] = value
         
     await db.update_configs(user_id, current)
 
-# ================= WORKER INITIALIZATION ================= #
+# ================= WORKER INITIALIZATION (FIXED) ================= #
 
 async def start_clone_bot(FwdBot, data=None):
-   """Monkey-patches the client to add a custom message iterator."""
+   """
+   Client ko monkey-patch karta hai taaki hum bade channel se 
+   messages fetch kar sakein bina crash huye.
+   """
    await FwdBot.start()
    
-   async def iter_messages(
-      self, 
-      chat_id: Union[int, str], 
-      limit: int, 
-      offset: int = 0
-      ) -> Optional[AsyncGenerator["types.Message", None]]:
+   # FIX: Yahan 'self' hata diya hai taaki 'chat_id' missing wala error na aaye
+   async def iter_messages(chat_id, limit, offset=0):
         current = offset
         while True:
+            # Ek baar mein max 200 ids fetch karna safely
             new_diff = min(200, limit - current)
             if new_diff <= 0:
                 return
+            
             ids = [i for i in range(current, current + new_diff + 1)]
             try:
-                messages = await self.get_messages(chat_id, ids)
+                messages = await FwdBot.get_messages(chat_id, ids)
             except FloodWait as e:
                 await asyncio.sleep(e.value)
-                messages = await self.get_messages(chat_id, ids)
+                messages = await FwdBot.get_messages(chat_id, ids)
+            except Exception as e:
+                logger.error(f"Iter Error: {e}")
+                return
                 
             for message in messages:
                 yield message
                 current += 1
                 
+   # Function ko client instance ke saath chipkana
    FwdBot.iter_messages = iter_messages
    return FwdBot
 
@@ -93,17 +96,18 @@ class CLIENT:
      self.api_hash = Config.API_HASH
     
   def client(self, data, user=None):
-     """Initializes either a Bot or a Userbot client."""
-     if user == None and data.get('is_bot') == False:
+     """Bot Token ya Session String se client create karta hai."""
+     if user is None and data.get('is_bot') == False:
         return Client("USERBOT", self.api_id, self.api_hash, session_string=data.get('session'))
-     elif user == True:
+     elif user is True:
         return Client("USERBOT", self.api_id, self.api_hash, session_string=data)
-     elif user != False:
-        data = data.get('token')
-     return Client("BOT", self.api_id, self.api_hash, bot_token=data, in_memory=True)
+     
+     # Agar user False ya None hai aur data string hai toh Bot Token samjhega
+     token = data if isinstance(data, str) else data.get('token')
+     return Client("BOT", self.api_id, self.api_hash, bot_token=token, in_memory=True)
   
   async def add_bot(self, bot, message):
-     """Logic to add a worker bot via token."""
+     """Bot Token ke zariye worker add karna."""
      user_id = int(message.from_user.id)
      msg = await bot.ask(chat_id=user_id, text=BOT_TOKEN_TEXT)
      if msg.text == '/cancel':
@@ -116,7 +120,7 @@ class CLIENT:
        return await msg.reply_text("<b>Invalid Token: No bot token found.</b>")
        
      try:
-       _client = await start_clone_bot(self.client(bot_token, False), True)
+       _client = await start_clone_bot(self.client(bot_token, False))
        _bot = _client.me
        details = {
          'id': _bot.id,
@@ -134,7 +138,7 @@ class CLIENT:
        return False
 
   async def add_login(self, bot, message):
-    """Direct login logic for Userbots."""
+    """Phone number se login karke Userbot/Session add karna."""
     user_id = int(message.from_user.id)
     api_id = Config.API_ID
     api_hash = Config.API_HASH
@@ -188,13 +192,13 @@ class CLIENT:
     return details    
 
   async def add_session(self, bot, message):
-     """Adding an existing Pyrogram String Session."""
+     """Direct Pyrogram Session String add karna."""
      user_id = int(message.from_user.id)
      msg = await bot.ask(chat_id=user_id, text="<b>Send your Pyrogram Session String.\n\n/cancel - To cancel.</b>")
      if msg.text == '/cancel': return
      
      try:
-       client = await start_clone_bot(self.client(msg.text, True), True)
+       client = await start_clone_bot(self.client(msg.text, True))
        user = client.me
        details = {
          'id': user.id,
@@ -213,7 +217,7 @@ class CLIENT:
 # ================= BUTTON PARSER ================= #
 
 def parse_buttons(text, markup=True):
-    """Parses custom button strings like [Name][buttonurl:link]."""
+    """Custom button format [Name][buttonurl:link] ko InlineButtons mein badalta hai."""
     buttons = []
     if not text:
         return None
