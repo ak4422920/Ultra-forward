@@ -81,41 +81,50 @@ class Database:
         b_users = [user['id'] async for user in users]
         return b_users
 
+    class Database:
+    
+    # ... (baaki purane functions: __init__, add_user, etc.) ...
+
     async def update_configs(self, id, configs):
         await self.col.update_one({'id': int(id)}, {'$set': {'configs': configs}})
          
     async def get_configs(self, id):
-    # Aapka default dictionary (Wahi rahega jo upar hai)
-    default = {
-        'caption': None,
-        'duplicate': True,
-        'forward_tag': False,
-        'file_size': 0,
-        'size_limit': None,
-        'extension': None,
-        'keywords': None,
-        'protect': None,
-        'button': None,
-        'db_uri': None,
-        'thumbnail': None,
-        'replace_words': {},
-        'admin_backup': None,
-        'filters': {
-           'poll': True, 'text': True, 'audio': True, 'voice': True,
-           'video': True, 'photo': True, 'document': True,
-           'animation': True, 'sticker': True
+        """
+        Ye logic ab 'Indestructible' hai. Purane users ka data naye 
+        defaults ke saath merge ho jayega taaki bot kabhi crash na ho.
+        """
+        default = {
+            'caption': None,
+            'duplicate': True,
+            'forward_tag': False,
+            'file_size': 0,
+            'size_limit': None,
+            'extension': None,
+            'keywords': None,
+            'protect': None,
+            'button': None,
+            'db_uri': None,
+            'thumbnail': None,       # Custom Thumbnail ID
+            'replace_words': {},     # Keyword Mapping
+            'admin_backup': None,    # Backup Channel ID
+            'filters': {
+               'poll': True, 'text': True, 'audio': True, 'voice': True,
+               'video': True, 'photo': True, 'document': True,
+               'animation': True, 'sticker': True
+            }
         }
-    }
 
-    user = await self.col.find_one({'id': int(id)})
-    
-    # AGAR USER MILTA HAI TO MERGE KARO
-    if user and 'configs' in user:
-        config_data = default.copy() # Pehle default values lo
-        config_data.update(user['configs']) # Purane user ka data uspar overwrite karo
-        return config_data
+        user = await self.col.find_one({'id': int(id)})
         
-    return default # Bilkul naye user ke liye sirf default 
+        # Merge Logic: Default values + User overrides
+        if user and 'configs' in user:
+            config_data = default.copy()
+            config_data.update(user['configs'])
+            return config_data
+            
+        return default 
+       
+    # ... (baaki functions: add_bot, get_filters, add_task, etc.) ...
        
     async def add_bot(self, datas):
        if not await self.is_bot_exist(datas['user_id']):
