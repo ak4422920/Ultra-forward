@@ -1,53 +1,48 @@
-#Dont Remove My Credit @Silicon_Bot_Update 
-#This Repo Is By @Silicon_Official 
-# For Any Kind Of Error Ask Us In Support Group @Silicon_Botz 
-
 {
-  "name": "Auto-Forward-Bot-V2",
-  "description": "Telegram's Best Smart Plugin File Forward Bot",
+  "name": "Ultra-Forward-Bot-V3",
+  "description": "Advanced Telegram Forwarding Bot with Auto-Resume and Keyword Mapping.",
   "stack": "container",
   "keywords": [
     "telegram",
-    "best",
-    "file",
     "forward",
-    "bot"
+    "bot",
+    "auto-resume",
+    "elite"
   ],
-  "success_url": "https://t.me/Silicon_Bot_Update",
-  "repository": "https://github.com/Silicon-Developer/Ultra-Forward-Bot",
+  "website": "https://github.com/yourusername/your-repo",
+  "repository": "https://github.com/yourusername/your-repo",
   "env": {
     "API_ID": {
-      "description": "Get this value from https://my.telegram.org or @UseTGSBot",
+      "description": "Get this from https://my.telegram.org",
       "value": ""
     },
     "API_HASH": {
-      "description": "Get this value from https://my.telegram.org or @UseTGSBot",
+      "description": "Get this from https://my.telegram.org",
       "value": ""
     },
     "BOT_TOKEN": {
       "description": "Your bot token from @BotFather",
       "value": ""
-
-#Dont Remove My Credit @Silicon_Bot_Update 
-#This Repo Is By @Silicon_Official 
-# For Any Kind Of Error Ask Us In Support Group @Silicon_Botz 
-
     },
     "BOT_OWNER_ID": {
-      "description": "Enter Your Telegram id",
+      "description": "Your Telegram Numeric ID.",
       "value": ""
-    },
-    "BANNED_USERS": {
-      "description": "If you want to add a caption to the forwarded file, enter it here",
-      "required": false
-    },
-    "DATABASE_NAME": {
-      "description": "Type Of filters (document , audio , photo , video , animation)",
-      "value": "document"
     },
     "DATABASE_URI": {
-      "description": "Your MongoDB Uri"
+      "description": "Your MongoDB Connection String.",
       "value": ""
+    },
+    "LOG_CHANNEL": {
+      "description": "Log Channel ID (with -100) to receive bot logs.",
+      "value": ""
+    },
+    "FORCE_SUB_CHANNEL": {
+      "description": "Channel Link for Force Subscription (e.g. https://t.me/yourchannel).",
+      "value": ""
+    },
+    "FORCE_SUB_ON": {
+      "description": "Set to 'True' to enable force sub, otherwise 'False'.",
+      "value": "False"
     }
   },
   "formation": {
@@ -57,6 +52,3 @@
     }
   }
 }
-#Dont Remove My Credit @Silicon_Bot_Update 
-#This Repo Is By @Silicon_Official 
-# For Any Kind Of Error Ask Us In Support Group @Silicon_Botz 
