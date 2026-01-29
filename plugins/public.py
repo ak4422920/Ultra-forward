@@ -1,3 +1,7 @@
+#Dont Remove My Credit @Silicon_Bot_Update 
+#This Repo Is By @Silicon_Official 
+# For Any Kind Of Error Ask Us In Support Group @Silicon_Botz 
+
 import re
 import asyncio 
 from .utils import STS
@@ -90,3 +94,6 @@ async def run(bot, message):
     )
     STS(forward_id).store(chat_id, toid, int(skipno.text), int(last_msg_id))
     
+#Dont Remove My Credit @Silicon_Bot_Update 
+#This Repo Is By @Silicon_Official 
+# For Any Kind Of Error Ask Us In Support Group @Silicon_Botz 
