@@ -18,17 +18,17 @@ async def run(bot, message):
     btn_data = {}
     user_id = message.from_user.id
     
-    # Check if worker bot is added
+    # 1. Check if worker bot/session is added
     _bot = await db.get_bot(user_id)
     if not _bot:
       return await message.reply("<b>❌ Error:</b>\nYou haven't added any Bot/Userbot. Please add one in /settings first.")
     
-    # Check if target channels are set
+    # 2. Check if target channels are set
     channels = await db.get_user_channels(user_id)
     if not channels:
        return await message.reply_text("<b>❌ Error:</b>\nPlease set a Target Channel in /settings before forwarding.")
 
-    # Target Selection Logic
+    # 3. Target Selection Logic
     if len(channels) > 1:
        for channel in channels:
           buttons.append([KeyboardButton(f"{channel['title']}")])
@@ -48,18 +48,19 @@ async def run(bot, message):
        toid = channels[0]['chat_id']
        to_title = channels[0]['title']
 
-    # Source Selection Logic
+    # 4. Source Selection Logic
     fromid = await bot.ask(message.chat.id, Translation.FROM_MSG, reply_markup=ReplyKeyboardRemove())
     
     if fromid.text and fromid.text.startswith('/'):
         return await message.reply(Translation.CANCEL)
     
-    # Extract Chat ID and Last Message ID
+    # Extract Chat ID and Last Message ID from Link or Forward
     if fromid.text and not fromid.forward_date:
+        # Regex to handle public and private (c/) links
         regex = re.compile(r"(https://)?(t\.me/|telegram\.me/|telegram\.dog/)(c/)?(\d+|[a-zA-Z_0-9]+)/(\d+)$")
         match = regex.match(fromid.text.replace("?single", ""))
         if not match:
-            return await message.reply('<b>❌ Invalid link provided!</b>')
+            return await message.reply('<b>❌ Invalid link! Please send a valid message link.</b>')
         
         chat_id = match.group(4)
         last_msg_id = int(match.group(5))
@@ -70,50 +71,57 @@ async def run(bot, message):
             return await message.reply_text("<b>❌ Error:</b> Source must be a Channel.")
             
         last_msg_id = fromid.forward_from_message_id
-        chat_id = fromid.forward_from_chat.username or fromid.forward_from_chat.id
-        
-        if last_msg_id is None:
-           return await message.reply_text("<b>❌ Anonymous Admin Alert:</b> Please send the last message LINK instead of forwarding.")
+        chat_id = fromid.forward_from_chat.id # Using ID is more reliable than username
     else:
-        return await message.reply_text("<b>❌ Invalid Input!</b>")
+        return await message.reply_text("<b>❌ Invalid Input! Send link or forward a message.</b>")
 
-    # Fetching Source Title for Confirmation
+    # Fetching Source Title for Confirmation UI
     try:
         source_info = await bot.get_chat(chat_id)
         title = source_info.title
-    except (PrivateChat, ChannelPrivate, ChannelInvalid):
-        title = "Private Chat/Restricted"
-    except Exception:
-        title = "Source Chat"
+    except:
+        title = "Source Chat (Private/Hidden)"
 
-    # Skip Number Logic
+    # 5. Skip Number Logic
     skipno = await bot.ask(message.chat.id, Translation.SKIP_MSG)
-    if skipno.text.startswith('/'):
-        return await message.reply(Translation.CANCEL)
-    
+    if skipno.text.startswith('/'): return await message.reply(Translation.CANCEL)
     try:
         skip_val = int(skipno.text)
     except:
         skip_val = 0
 
-    # Task Storage for Engine
+    # 6. Limit Number Logic (Naya Step jo missing tha)
+    limit_msg = await bot.ask(message.chat.id, "<b>LIMIT MESSAGES 🛑</b>\n\nEnter 0 for no limit.\nExample: 100 to stop after 100 messages.")
+    if limit_msg.text.startswith('/'): return await message.reply(Translation.CANCEL)
+    try:
+        limit_val = int(limit_msg.text)
+    except:
+        limit_val = 0
+
+    # 7. Final Confirmation
     forward_id = f"{user_id}-{skipno.id}"
-    buttons = [[
+    confirm_buttons = [[
         InlineKeyboardButton('✅ Yes, Start', callback_data=f"start_public_{forward_id}"),
         InlineKeyboardButton('❌ No, Cancel', callback_data="close_btn")
     ]]
     
-    await message.reply_text(
-        text=Translation.DOUBLE_CHECK.format(
-            botname=_bot['name'], 
-            botuname=_bot['username'], 
-            from_chat=title, 
-            to_chat=to_title, 
-            skip=skip_val
-        ),
-        disable_web_page_preview=True,
-        reply_markup=InlineKeyboardMarkup(buttons)
+    # Translation strings ko placeholders ke sath format karna
+    conf_text = (
+        "<b>DOUBLE CHECK DETAILS 📋</b>\n\n"
+        f"<b>🤖 Bot:</b> {_bot['name']}\n"
+        f"<b>📤 From:</b> {title}\n"
+        f"<b>📥 To:</b> {to_title}\n"
+        f"<b>⏩ Skip:</b> {skip_val}\n"
+        f"<b>🛑 Limit:</b> {limit_val if limit_val != 0 else 'No Limit'}\n\n"
+        "<i>Do you want to start forwarding?</i>"
     )
     
-    # Store Task Details in Memory (Regix.py will pick it from here)
-    STS(forward_id).store(chat_id, toid, skip_val, last_msg_id)
+    await message.reply_text(
+        text=conf_text,
+        disable_web_page_preview=True,
+        reply_markup=InlineKeyboardMarkup(confirm_buttons)
+    )
+    
+    # Task Storage for Regix.py Engine
+    # STS Parameters: (chat_id, toid, skip, last_msg_id, limit)
+    STS(forward_id).store(chat_id, toid, skip_val, last_msg_id, limit_val)
