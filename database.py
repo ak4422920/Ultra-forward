@@ -1,6 +1,4 @@
-#Dont Remove My Credit @Silicon_Bot_Update 
-#This Repo Is By @Silicon_Official 
-# For Any Kind Of Error Ask Us In Support Group @Silicon_Botz 
+# database.py 
 
 from os import environ 
 from config import Config
@@ -21,6 +19,7 @@ class Database:
         self.col = self.db.users
         self.nfy = self.db.notify
         self.chl = self.db.channels 
+        self.tasks = self.db.tasks  # New: Task queue for point #4 & #6
         
     def new_user(self, id, name):
         return dict(
@@ -31,11 +30,7 @@ class Database:
                 ban_reason="",
             ),
         )
- 
- #Dont Remove My Credit @Silicon_Bot_Update 
-#This Repo Is By @Silicon_Official 
-# For Any Kind Of Error Ask Us In Support Group @Silicon_Botz      
-                
+
     async def add_user(self, id, name):
         user = self.new_user(id, name)
         await self.col.insert_one(user)
@@ -92,6 +87,7 @@ class Database:
         await self.col.update_one({'id': int(id)}, {'$set': {'configs': configs}})
          
     async def get_configs(self, id):
+        # Point #1, #2, #3: Added new keys to default config
         default = {
             'caption': None,
             'duplicate': True,
@@ -103,6 +99,9 @@ class Database:
             'protect': None,
             'button': None,
             'db_uri': None,
+            'thumbnail': None,       # Custom Thumbnail ID
+            'replace_words': {},     # Keyword replacement dictionary
+            'admin_backup': None,    # Specific channel for admin file backup
             'filters': {
                'poll': True,
                'text': True,
@@ -123,9 +122,7 @@ class Database:
     async def add_bot(self, datas):
        if not await self.is_bot_exist(datas['user_id']):
           await self.bot.insert_one(datas)
-#Dont Remove My Credit @Silicon_Bot_Update 
-#This Repo Is By @Silicon_Official 
-# For Any Kind Of Error Ask Us In Support Group @Silicon_Botz     
+          
     async def remove_bot(self, user_id):
        await self.bot.delete_many({'user_id': int(user_id)})
       
@@ -177,9 +174,31 @@ class Database:
     
     async def get_all_frwd(self):
        return self.nfy.find({})
-       
- #Dont Remove My Credit @Silicon_Bot_Update 
-#This Repo Is By @Silicon_Official 
-# For Any Kind Of Error Ask Us In Support Group @Silicon_Botz 
+
+    # ================= TASK QUEUE FUNCTIONS (Auto-Resume Support) ================= #
+
+    async def add_task(self, user_id, task_data):
+        """Adds a new forwarding task to the database queue."""
+        task_data.update({'user_id': int(user_id), 'status': 'running'})
+        return await self.tasks.insert_one(task_data)
+
+    async def get_task(self, user_id):
+        """Fetches the current active task for a user."""
+        return await self.tasks.find_one({'user_id': int(user_id), 'status': 'running'})
+
+    async def update_task_status(self, user_id, last_msg_id):
+        """Updates the progress of a task so it can resume after restart."""
+        return await self.tasks.update_one(
+            {'user_id': int(user_id), 'status': 'running'},
+            {'$set': {'last_processed_id': last_msg_id}}
+        )
+
+    async def get_active_tasks(self):
+        """Fetches all tasks that were running before a bot restart."""
+        return self.tasks.find({'status': 'running'})
+
+    async def remove_task(self, user_id):
+        """Deletes or marks a task as completed."""
+        return await self.tasks.delete_one({'user_id': int(user_id), 'status': 'running'})
     
 db = Database(Config.DATABASE_URI, Config.DATABASE_NAME)
