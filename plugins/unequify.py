@@ -1,103 +1,119 @@
-#Dont Remove My Credit @Silicon_Bot_Update 
-#This Repo Is By @Silicon_Official 
-# For Any Kind Of Error Ask Us In Support Group @Silicon_Botz 
-
-import re, asyncio
+import re
+import asyncio
 from database import db
 from config import temp
 from .test import CLIENT , start_clone_bot
 from translation import Translation
 from pyrogram import Client, filters 
-#from pyropatch.utils import unpack_new_file_id
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 CLIENT = CLIENT()
+
+# Modern Buttons
 COMPLETED_BTN = InlineKeyboardMarkup(
    [
-      [InlineKeyboardButton('💟Adult ᴄʜᴀɴɴᴇʟ💟', url='https://t.me/PurelySin')],
-      [InlineKeyboardButton('💠ᴜᴘᴅᴀᴛᴇ ᴄʜᴀɴɴᴇʟ💠', url='https://t.me/AkMovieVerse')]
+      [InlineKeyboardButton('💠 ᴜᴘᴅᴀᴛᴇ ᴄʜᴀɴɴᴇʟ', url='https://t.me/AkMovieVerse')]
    ]
 )
 
 CANCEL_BTN = InlineKeyboardMarkup([[InlineKeyboardButton('• ᴄᴀɴᴄᴇʟ', 'terminate_frwd')]])
-#Dont Remove My Credit @Silicon_Bot_Update 
-#This Repo Is By @Silicon_Official 
-# For Any Kind Of Error Ask Us In Support Group @Silicon_Botz 
+
 @Client.on_message(filters.command("unequify") & filters.private)
 async def unequify(client, message):
    user_id = message.from_user.id
    temp.CANCEL[user_id] = False
+   
    if temp.lock.get(user_id) and str(temp.lock.get(user_id))=="True":
       return await message.reply("**ᴘʟᴇᴀsᴇ ᴡᴀɪᴛ ᴜɴᴛɪʟʟ ᴘʀᴇᴠɪᴏᴜs ᴛᴀsᴋ ᴄᴏᴍᴘʟᴇᴛᴇ**")
+   
    _bot = await db.get_bot(user_id)
    if not _bot or _bot['is_bot']:
-      return await message.reply("<b>Need userbot to do this process. Please add a userbot using /settings</b>")
+      return await message.reply("<b>Need Userbot to do this process. Please add a Userbot using /settings</b>")
+   
    target = await client.ask(user_id, text="**Forward the last message from target chat or send last message link.**\n/cancel - `cancel this process`")
+   
    if target.text.startswith("/"):
-      return await message.reply("**process cancelled !**")
-   elif target.text:
+      return await message.reply("**Process Cancelled !**")
+   
+   chat_id = None
+   if target.text:
       regex = re.compile(r"(https://)?(t\.me/|telegram\.me/|telegram\.dog/)(c/)?(\d+|[a-zA-Z_0-9]+)/(\d+)$")
       match = regex.match(target.text.replace("?single", ""))
       if not match:
-         return await message.reply('**Invalid link**')
+         return await message.reply('**Invalid Link**')
+      
       chat_id = match.group(4)
-      last_msg_id = int(match.group(5))
       if chat_id.isnumeric():
-         chat_id  = int(("-100" + chat_id))
-   elif fromid.forward_from_chat.type in ['channel', 'supergroup']:
-        last_msg_id = target.forward_from_message_id
-        chat_id = target.forward_from_chat.username or target.forward_from_chat.id
+         chat_id = int(("-100" + chat_id))
+   elif target.forward_from_chat:
+      chat_id = target.forward_from_chat.id
    else:
-        return await message.reply_text("**invalid !**")
-   confirm = await client.ask(user_id, text="**send /yes to start the process and /no to cancel this process**")
+      return await message.reply_text("**Invalid Input!**")
+
+   confirm = await client.ask(user_id, text="**Send /yes to start the process and /no to cancel.**")
    if confirm.text.lower() == '/no':
-      return await confirm.reply("**process cancelled !**")
-   sts = await confirm.reply("`processing..`")
+      return await confirm.reply("**Process Cancelled !**")
+   
+   sts = await confirm.reply("`Processing Duplicate Files...`")
+   
    try:
       bot = await start_clone_bot(CLIENT.client(_bot))
    except Exception as e:
-      return await sts.edit(e)
+      return await sts.edit(f"**Bot Start Error:** `{e}`")
+
    try:
-       k = await bot.send_message(chat_id, text="testing")
-       await k.delete()
+       test_msg = await bot.send_message(chat_id, text="`Duplicate Check Starting...`")
+       await test_msg.delete()
    except:
-       await sts.edit(f"**please make your [userbot](t.me/{_bot['username']}) admin in target chat with full permissions**")
+       await sts.edit(f"**Error:** Please make your Userbot admin in target chat.")
        return await bot.stop()
-   MESSAGES = []
-   DUPLICATE = []
-   total=deleted=0
+
+   MESSAGES_SET = set() # Faster lookup
+   DUPLICATE_IDS = []
+   total = 0
+   deleted = 0
    temp.lock[user_id] = True
+
    try:
-     await sts.edit(Translation.DUPLICATE_TEXT.format(total, deleted, "ᴘʀᴏɢʀᴇssɪɴɢ"), reply_markup=CANCEL_BTN)
-     async for message in bot.search_messages(chat_id=chat_id, filter="document"):
+     # Modern block-style progress tracking
+     async for msg in bot.search_messages(chat_id=chat_id, filter="document"):
         if temp.CANCEL.get(user_id) == True:
-           await sts.edit(Translation.DUPLICATE_TEXT.format(total, deleted, "ᴄᴀɴᴄᴇʟʟᴇᴅ"), reply_markup=COMPLETED_BTN)
+           await sts.edit("<b>❌ Process Cancelled by User.</b>", reply_markup=COMPLETED_BTN)
+           temp.lock[user_id] = False
            return await bot.stop()
-        file = message.document
-        file_id = unpack_new_file_id(file.file_id) 
-        if file_id in MESSAGES:
-           DUPLICATE.append(message.id)
+
+        file = msg.document
+        # Using file_unique_id for perfect duplicate detection
+        file_unique_id = file.file_unique_id 
+        
+        if file_unique_id in MESSAGES_SET:
+           DUPLICATE_IDS.append(msg.id)
         else:
-           MESSAGES.append(file_id)
+           MESSAGES_SET.add(file_unique_id)
+        
         total += 1
-        if total %10000 == 0:
-           await sts.edit(Translation.DUPLICATE_TEXT.format(total, deleted, "ᴘʀᴏɢʀᴇssɪɴɢ"), reply_markup=CANCEL_BTN)
-        if len(DUPLICATE) >= 100:
-           await bot.delete_messages(chat_id, DUPLICATE)
-           deleted += 100
-           await sts.edit(Translation.DUPLICATE_TEXT.format(total, deleted, "ᴘʀᴏɢʀᴇssɪɴɢ"), reply_markup=CANCEL_BTN)
-           DUPLICATE = []
-     if DUPLICATE:
-        await bot.delete_messages(chat_id, DUPLICATE)
-        deleted += len(DUPLICATE)
+        
+        # UI Update
+        if total % 100 == 0:
+           await sts.edit(f"🔍 **Scanning:** `{total}` files\n🗑️ **Duplicates Found:** `{len(DUPLICATE_IDS) + deleted}`", reply_markup=CANCEL_BTN)
+        
+        # Delete in batches to avoid flood
+        if len(DUPLICATE_IDS) >= 100:
+           await bot.delete_messages(chat_id, DUPLICATE_IDS)
+           deleted += len(DUPLICATE_IDS)
+           DUPLICATE_IDS = []
+           await sts.edit(f"🔍 **Scanning:** `{total}` files\n🗑️ **Deleted:** `{deleted}`", reply_markup=CANCEL_BTN)
+
+     # Final batch delete
+     if DUPLICATE_IDS:
+        await bot.delete_messages(chat_id, DUPLICATE_IDS)
+        deleted += len(DUPLICATE_IDS)
+
    except Exception as e:
        temp.lock[user_id] = False 
-       await sts.edit(f"**ERROR**\n`{e}`")
+       await sts.edit(f"**ERROR:** `{e}`")
        return await bot.stop()
+
    temp.lock[user_id] = False
-   await sts.edit(Translation.DUPLICATE_TEXT.format(total, deleted, "ᴄᴏᴍᴘʟᴇᴛᴇᴅ"), reply_markup=COMPLETED_BTN)
+   await sts.edit(f"✅ **Process Completed!**\n\nTotal Scanned: `{total}`\nDuplicates Removed: `{deleted}`", reply_markup=COMPLETED_BTN)
    await bot.stop()
-   
-#Dont Remove My Credit @Silicon_Bot_Update 
-#This Repo Is By @Silicon_Official 
-# For Any Kind Of Error Ask Us In Support Group @Silicon_Botz 
