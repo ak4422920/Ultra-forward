@@ -1,7 +1,3 @@
-#Dont Remove My Credit @Silicon_Bot_Update 
-#This Repo Is By @Silicon_Official 
-# For Any Kind Of Error Ask Us In Support Group @Silicon_Botz 
-
 import asyncio
 import logging 
 import logging.config
@@ -12,11 +8,7 @@ from pyrogram.raw.all import layer
 from pyrogram.enums import ParseMode
 from pyrogram.errors import FloodWait 
 from aiohttp import web
-from plugins import web_server 
-
-#Dont Remove My Credit @Silicon_Bot_Update 
-#This Repo Is By @Silicon_Official 
-# For Any Kind Of Error Ask Us In Support Group @Silicon_Botz 
+from plugins import web_server  
 
 logging.config.fileConfig('logging.conf')
 logging.getLogger().setLevel(logging.INFO)
@@ -50,9 +42,7 @@ class Bot(Client):
         text = "<b>๏[-ิ_•ิ]๏ ʙᴏᴛ ʀᴇsᴛᴀʀᴛᴇᴅ !</b>"
         logging.info(text)
         success = failed = 0
-#Dont Remove My Credit @Silicon_Bot_Update 
-#This Repo Is By @Silicon_Official 
-# For Any Kind Of Error Ask Us In Support Group @Silicon_Botz 
+ 
         users = await db.get_all_frwd()
         async for user in users:
            chat_id = user['user_id']
@@ -70,17 +60,11 @@ class Bot(Client):
            logging.info(f"Restart message status"
                  f"success: {success}"
                  f"failed: {failed}")
-#Dont Remove My Credit @Silicon_Bot_Update 
-#This Repo Is By @Silicon_Official 
-# For Any Kind Of Error Ask Us In Support Group @Silicon_Botz 
+ 
     async def stop(self, *args):
         msg = f"@{self.username} stopped. Bye."
         await super().stop()
         logging.info(msg)
 
 app = Bot()
-app.run()
-
-#Dont Remove My Credit @Silicon_Bot_Update 
-#This Repo Is By @Silicon_Official 
-# For Any Kind Of Error Ask Us In Support Group @Silicon_Botz 
+app.run() 
