@@ -81,17 +81,13 @@ class Database:
         b_users = [user['id'] async for user in users]
         return b_users
 
-    class Database:
-    
-    # ... (baaki purane functions: __init__, add_user, etc.) ...
-
     async def update_configs(self, id, configs):
         await self.col.update_one({'id': int(id)}, {'$set': {'configs': configs}})
          
     async def get_configs(self, id):
         """
-        Ye logic ab 'Indestructible' hai. Purane users ka data naye 
-        defaults ke saath merge ho jayega taaki bot kabhi crash na ho.
+        Merge Logic: Purane users ka data naye defaults ke saath merge hota hai 
+        taaki bot kabhi crash na ho.
         """
         default = {
             'caption': None,
@@ -105,7 +101,7 @@ class Database:
             'button': None,
             'db_uri': None,
             'thumbnail': None,       # Custom Thumbnail ID
-            'replace_words': {},     # Keyword Mapping
+            'replace_words': {},     # Keyword Mapping (old: new)
             'admin_backup': None,    # Backup Channel ID
             'filters': {
                'poll': True, 'text': True, 'audio': True, 'voice': True,
@@ -116,15 +112,13 @@ class Database:
 
         user = await self.col.find_one({'id': int(id)})
         
-        # Merge Logic: Default values + User overrides
+        # Agar user ka data milta hai, toh use default ke upar overwrite karo
         if user and 'configs' in user:
             config_data = default.copy()
             config_data.update(user['configs'])
             return config_data
             
         return default 
-       
-    # ... (baaki functions: add_bot, get_filters, add_task, etc.) ...
        
     async def add_bot(self, datas):
        if not await self.is_bot_exist(datas['user_id']):
@@ -166,8 +160,9 @@ class Database:
      
     async def get_filters(self, user_id):
        filters = []
-       filter = (await self.get_configs(user_id))['filters']
-       for k, v in filter.items():
+       configs = await self.get_configs(user_id)
+       filter_data = configs.get('filters', {})
+       for k, v in filter_data.items():
           if v == False:
             filters.append(str(k))
        return filters
@@ -182,7 +177,7 @@ class Database:
     async def get_all_frwd(self):
        return self.nfy.find({})
 
-    # --- Task Persistence Functions ---
+    # --- Task Persistence Functions (For Auto-Resume) ---
 
     async def add_task(self, user_id, task_data):
         task_data.update({'user_id': int(user_id), 'status': 'running'})
