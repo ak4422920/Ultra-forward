@@ -1,7 +1,3 @@
-#Dont Remove My Credit @Silicon_Bot_Update 
-#This Repo Is By @Silicon_Official 
-# For Any Kind Of Error Ask Us In Support Group @Silicon_Botz 
-
 import os
 import sys 
 import math
@@ -21,12 +17,7 @@ from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, CallbackQ
 CLIENT = CLIENT()
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
-TEXT = Translation.TEXT
-
-
-#Dont Remove My Credit @Silicon_Bot_Update 
-#This Repo Is By @Silicon_Official 
-# For Any Kind Of Error Ask Us In Support Group @Silicon_Botz 
+TEXT = Translation.TEXT 
 
 @Client.on_callback_query(filters.regex(r'^start_public'))
 async def pub_(bot, message):
@@ -120,11 +111,7 @@ async def pub_(bot, message):
         temp.IS_FRWD_CHAT.remove(sts.TO)
         await send(client, user, "<b>🎉 ғᴏʀᴡᴀᴅɪɴɢ ᴄᴏᴍᴘʟᴇᴛᴇᴅ</b>")
         await edit(m, 'ᴄᴏᴍᴘʟᴇᴛᴇᴅ', "ᴄᴏᴍᴘʟᴇᴛᴇᴅ", sts) 
-        await stop(client, user)
-        
-#Dont Remove My Credit @Silicon_Bot_Update 
-#This Repo Is By @Silicon_Official 
-# For Any Kind Of Error Ask Us In Support Group @Silicon_Botz 
+        await stop(client, user) 
 
 async def copy(bot, msg, m, sts):
    try:                                  
@@ -150,11 +137,7 @@ async def copy(bot, msg, m, sts):
      await copy(bot, msg, m, sts)
    except Exception as e:
      print(e)
-     sts.add('deleted')
-
-#Dont Remove My Credit @Silicon_Bot_Update 
-#This Repo Is By @Silicon_Official 
-# For Any Kind Of Error Ask Us In Support Group @Silicon_Botz 
+     sts.add('deleted') 
 
 async def forward(bot, msg, m, sts, protect):
    try:                             
@@ -191,11 +174,7 @@ async def msg_edit(msg, text, button=None, wait=None):
     except FloodWait as e:
         if wait:
            await asyncio.sleep(e.value)
-           return await msg_edit(msg, text, button, wait)
-
-#Dont Remove My Credit @Silicon_Bot_Update 
-#This Repo Is By @Silicon_Official 
-# For Any Kind Of Error Ask Us In Support Group @Silicon_Botz 
+           return await msg_edit(msg, text, button, wait) 
 
 async def edit(msg, title, status, sts):
    i = sts.get(full=True)
@@ -234,11 +213,7 @@ async def is_cancelled(client, user, msg, sts):
       await send(client, user, "<b>❌ ғᴏʀᴡᴀʀᴅɪɴɢ ᴄᴀɴᴄᴇʟʟᴇᴅ</b>")
       await stop(client, user)
       return True 
-   return False 
-
-#Dont Remove My Credit @Silicon_Bot_Update 
-#This Repo Is By @Silicon_Official 
-# For Any Kind Of Error Ask Us In Support Group @Silicon_Botz 
+   return False  
 
 async def stop(client, user):
    try:
@@ -253,11 +228,7 @@ async def send(bot, user, text):
    try:
       await bot.send_message(user, text=text)
    except:
-      pass 
-
-#Dont Remove My Credit @Silicon_Bot_Update 
-#This Repo Is By @Silicon_Official 
-# For Any Kind Of Error Ask Us In Support Group @Silicon_Botz 
+      pass  
 
 
 def custom_caption(msg, caption):
@@ -273,11 +244,7 @@ def custom_caption(msg, caption):
         if caption:
           return caption.format(filename=file_name, size=get_size(file_size), caption=fcaption)
         return fcaption
-  return None
-
-#Dont Remove My Credit @Silicon_Bot_Update 
-#This Repo Is By @Silicon_Official 
-# For Any Kind Of Error Ask Us In Support Group @Silicon_Botz 
+  return None 
 
 def get_size(size):
   units = ["Bytes", "KB", "MB", "GB", "TB", "PB", "EB"]
@@ -293,11 +260,7 @@ def media(msg):
      media = getattr(msg, msg.media.value, None)
      if media:
         return getattr(media, 'file_id', None)
-  return None 
-  
-#Dont Remove My Credit @Silicon_Bot_Update 
-#This Repo Is By @Silicon_Official 
-# For Any Kind Of Error Ask Us In Support Group @Silicon_Botz 
+  return None  
 
 def TimeFormatter(milliseconds: int) -> str:
     seconds, milliseconds = divmod(int(milliseconds), 1000)
@@ -319,11 +282,7 @@ async def terminate_frwding(bot, m):
     user_id = m.from_user.id 
     temp.lock[user_id] = False
     temp.CANCEL[user_id] = True 
-    await m.answer("ғᴏʀᴡᴀʀᴅɪɴɢ ᴄᴀɴᴄᴇʟʟᴇᴅ !", show_alert=True)
-
-#Dont Remove My Credit @Silicon_Bot_Update 
-#This Repo Is By @Silicon_Official 
-# For Any Kind Of Error Ask Us In Support Group @Silicon_Botz 
+    await m.answer("ғᴏʀᴡᴀʀᴅɪɴɢ ᴄᴀɴᴄᴇʟʟᴇᴅ !", show_alert=True) 
 
 @Client.on_callback_query(filters.regex(r'^fwrdstatus'))
 async def status_msg(bot, msg):
@@ -338,11 +297,7 @@ async def status_msg(bot, msg):
        remaining = total - forwarded - skipped
     est_time = TimeFormatter(milliseconds=est_time)
     est_time = est_time if (est_time != '' or status not in ['completed', 'cancelled']) else '0 s'
-    return await msg.answer(PROGRESS.format(percentage, fetched, forwarded, remaining, status, est_time), show_alert=True)
-
-#Dont Remove My Credit @Silicon_Bot_Update 
-#This Repo Is By @Silicon_Official 
-# For Any Kind Of Error Ask Us In Support Group @Silicon_Botz 
+    return await msg.answer(PROGRESS.format(percentage, fetched, forwarded, remaining, status, est_time), show_alert=True) 
 
 @Client.on_message(filters.command("stop"))
 async def stop_forwarding(bot, message):
@@ -359,7 +314,4 @@ async def stop_forwarding(bot, message):
 async def close(bot, update):
     await update.answer()
     await update.message.delete()
-    
- #Dont Remove My Credit @Silicon_Bot_Update 
-#This Repo Is By @Silicon_Official 
-# For Any Kind Of Error Ask Us In Support Group @Silicon_Botz 
+     
