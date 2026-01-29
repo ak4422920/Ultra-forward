@@ -9,8 +9,8 @@
     "auto-resume",
     "elite"
   ],
-  "website": "https://github.com/yourusername/your-repo",
-  "repository": "https://github.com/yourusername/your-repo",
+  "website": "https://github.com/ak4422920/Ultra-forward",
+"repository": "https://github.com/ak4422920/Ultra-forward",
   "env": {
     "API_ID": {
       "description": "Get this from https://my.telegram.org",
