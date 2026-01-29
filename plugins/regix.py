@@ -13,9 +13,9 @@ from pyrogram import Client, filters
 from pyrogram.errors import FloodWait, MessageNotModified, RPCError
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery, Message 
 
-CLIENT = CLIENT()
+# --- Initialization ---
+CLIENT_OBJ = CLIENT()
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 TEXT = Translation.TEXT
 
 # ================= HELPER FUNCTIONS ================= #
