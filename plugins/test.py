@@ -23,11 +23,36 @@ from translation import Translation
 from typing import Union, Optional, AsyncGenerator
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
 BTN_URL_REGEX = re.compile(r"(\[([^\[]+?)]\[buttonurl:/{0,2}(.+?)(:same)?])")
 BOT_TOKEN_TEXT = "<b>1) Create a bot using @BotFather\n2) Then you will get a message with bot token\n3) Forward that message to me</b>"
-SESSION_STRING_SIZE = 351
+
+# ================= CONFIG HELPERS (Crucial for Settings.py) ================= #
+
+async def get_configs(user_id):
+    """Point #1: Fetching user configurations from database."""
+    return await db.get_configs(user_id)
+
+async def update_configs(user_id, key, value):
+    """Point #2: Centralized function to update specific user configurations."""
+    current = await db.get_configs(user_id)
+    
+    # List of keys that live in the root of the config dict
+    root_keys = [
+        'caption', 'duplicate', 'db_uri', 'forward_tag', 
+        'protect', 'file_size', 'size_limit', 'extension', 
+        'keywords', 'button', 'replace_words', 'admin_backup', 'thumbnail'
+    ]
+    
+    if key in root_keys:
+        current[key] = value
+    else: 
+        # If not in root, it's a filter setting inside the 'filters' sub-dict
+        if 'filters' not in current:
+            current['filters'] = {}
+        current['filters'][key] = value
+        
+    await db.update_configs(user_id, current)
 
 # ================= WORKER INITIALIZATION ================= #
 
@@ -41,13 +66,11 @@ async def start_clone_bot(FwdBot, data=None):
       limit: int, 
       offset: int = 0
       ) -> Optional[AsyncGenerator["types.Message", None]]:
-        """Custom generator to fetch messages sequentially by ID."""
         current = offset
         while True:
             new_diff = min(200, limit - current)
             if new_diff <= 0:
                 return
-            # IDs list generate karna fetch karne ke liye
             ids = [i for i in range(current, current + new_diff + 1)]
             try:
                 messages = await self.get_messages(chat_id, ids)
@@ -187,39 +210,13 @@ class CLIENT:
      except Exception as e:
        await msg.reply_text(f"<b>USER BOT ERROR:</b> `{e}`")
 
-# ================= CONFIG & BUTTON HELPERS ================= #
-
-@Client.on_message(filters.private & filters.command('reset'))
-async def reset_settings(bot, m):
-    try:
-        # Fetching default configs defined in database.py
-        default = await db.get_configs("000000") # Dummy ID to get defaults
-        await db.update_configs(m.from_user.id, default)
-        await m.reply("<b>Successfully reset settings ✔️</b>")
-    except Exception as e:
-        await m.reply(f"<b>Error:</b> `{e}`")
-
-async def update_configs(user_id, key, value):
-  """Point #1, #3, #4: Centralized function to update user configurations."""
-  current = await db.get_configs(user_id)
-  
-  # List of keys that live in the root of the config dict
-  root_keys = [
-      'caption', 'duplicate', 'db_uri', 'forward_tag', 
-      'protect', 'file_size', 'size_limit', 'extension', 
-      'keywords', 'button', 'replace_words', 'admin_backup', 'thumbnail'
-  ]
-  
-  if key in root_keys:
-     current[key] = value
-  else: 
-     current['filters'][key] = value
-     
-  await db.update_configs(user_id, current)
+# ================= BUTTON PARSER ================= #
 
 def parse_buttons(text, markup=True):
     """Parses custom button strings like [Name][buttonurl:link]."""
     buttons = []
+    if not text:
+        return None
     for match in BTN_URL_REGEX.finditer(text):
         n_escapes = 0
         to_check = match.start(1) - 1
