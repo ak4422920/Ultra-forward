@@ -84,7 +84,6 @@ async def auto_restart_task(bot, user_id, task):
         frwd_id = task.get('frwd_id')
         sts = STS(frwd_id)
         last_id = task.get('last_processed_id', task['skip'])
-        # STS store call fixed for 5 arguments
         sts.store(task['from_chat'], task['to_chat'], last_id, task['limit'], task['limit'])
         await core_forward_engine(bot, user_id, sts, frwd_id, is_auto=True)
     except Exception as e:
@@ -136,13 +135,19 @@ async def core_forward_engine(bot, user, sts, frwd_id, message=None, is_auto=Fal
     temp.forwardings += 1
     await db.add_frwd(user)
     sts.add(time=True)
-    sleep_time = 1 if _bot['is_bot'] else 10
+    sleep_time = 1 if _bot['is_bot'] else 5
     temp.IS_FRWD_CHAT.append(i.TO)
     temp.lock[user] = True
 
     try:
         pling = 0
-        async for msg in client.iter_messages(client, sts.get('FROM'), limit=int(sts.get('limit')), offset=int(sts.get('skip'))):
+        # FIX: Limit 0 logic (0 means unlimited)
+        f_limit = int(sts.get('limit'))
+        if f_limit <= 0:
+            f_limit = 1000000 # Set a very high number for unlimited
+            
+        # FIX: chat_id positional argument error fixed
+        async for msg in client.iter_messages(sts.get('FROM'), limit=f_limit, offset=int(sts.get('skip'))):
             if await is_cancelled(client, user, m, sts): return
             
             if pling % 10 == 0: 
@@ -165,11 +170,15 @@ async def core_forward_engine(bot, user, sts, frwd_id, message=None, is_auto=Fal
                 sts.add('total_files')
             await asyncio.sleep(sleep_time) 
 
+        # Agar loop ke bahar aa gaya aur kuch fetch nahi hua
+        if pling == 0:
+            if m: await msg_edit(m, "<b>❌ No messages found!</b>\nCheck if your Skip value is higher than total messages.", wait=True)
+
     except Exception as e:
         if m: await msg_edit(m, f'<b>ERROR IN ENGINE:</b>\n`{e}`', wait=True)
     
     await db.remove_task(user)
-    temp.IS_FRWD_CHAT.remove(i.TO)
+    if i.TO in temp.IS_FRWD_CHAT: temp.IS_FRWD_CHAT.remove(i.TO)
     if not is_auto:
         await send(client, user, "<b>🎉 ғᴏʀᴡᴀᴅɪɴɢ ᴄᴏᴍᴘʟᴇᴛᴇᴅ</b>")
         await edit(m, 'ᴄᴏᴍᴘʟᴇᴛᴇᴅ', "ᴄᴏᴍᴘʟᴇᴛᴇᴅ", sts) 
@@ -211,13 +220,16 @@ async def forward(bot, ids, m, sts, protect, admin_backup=None):
 async def edit(msg, title, status, sts):
     if not msg: return
     i = sts.get(full=True)
-    percentage = "{:.1f}".format(float(i.fetched)*100/float(i.total)) if int(i.total) > 0 else "0"
+    
+    # Logic to handle 0 total messages for percentage
+    total_val = int(i.total) if int(i.total) > 0 else 1
+    percentage = "{:.1f}".format(float(i.fetched)*100/total_val)
     
     now = time.time()
     diff = int(now - i.start)
     speed = sts.divide(i.fetched, diff)
     elapsed_time = round(diff) * 1000
-    time_to_completion = round(sts.divide(i.total - i.fetched, int(speed))) * 1000
+    time_to_completion = round(sts.divide(total_val - i.fetched, int(speed))) * 1000
     estimated_total_time = elapsed_time + time_to_completion  
     
     filled_blocks = math.floor(float(percentage) / 10)
@@ -244,7 +256,8 @@ async def msg_edit(msg, text, button=None, wait=None):
 
 async def is_cancelled(client, user, msg, sts):
     if temp.CANCEL.get(user):
-        temp.IS_FRWD_CHAT.remove(sts.get('TO'))
+        target_chat = sts.get('TO')
+        if target_chat in temp.IS_FRWD_CHAT: temp.IS_FRWD_CHAT.remove(target_chat)
         if msg: await edit(msg, "ᴄᴀɴᴄᴇʟʟᴇᴅ", "ᴄᴏᴍᴘʟᴇᴛᴇᴅ", sts)
         await stop(client, user)
         return True 
