@@ -223,3 +223,15 @@ def media(msg):
     if msg.media:
         return getattr(getattr(msg, msg.media.value, None), 'file_id', None)
     return None
+
+# ================= AUTO-RESUME WRAPPER ================= #
+
+async def auto_restart_task(bot, user_id, task_data):
+    """Ye function bot restart hone par task ko engine mein wapas bhejta hai."""
+    # STS ko yahan import karna zaroori hai
+    from .utils import STS
+    frwd_id = task_data.get('frwd_id') 
+    if frwd_id:
+        sts = STS(frwd_id)
+        # core_forward_engine ko is_auto=True ke saath chalana
+        await core_forward_engine(bot, user_id, sts, frwd_id, is_auto=True)
