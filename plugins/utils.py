@@ -2,6 +2,7 @@ import time as tm
 from database import db 
 from .test import parse_buttons
 
+# Global dictionary for session data
 STATUS = {}
 
 class STS:
@@ -11,25 +12,28 @@ class STS:
         
     def verify(self):
         """Task ID valid hai ya nahi check karne ke liye."""
-        return self.data.get(self.id)
+        return self.id in self.data
     
-    def store(self, From, to, skip, limit):
-        """Task start hote waqt initial data save karta hai."""
+    def store(self, From, to, skip, total, limit=0):
+        """
+        Setup ke details save karta hai. 
+        Note: total yahan 'last_msg_id' hai jo regix use karta hai.
+        """
         self.data[self.id] = {
             "FROM": From, 
             'TO': to, 
             'total_files': 0, 
             'skip': skip, 
             'limit': limit,
-            'fetched': skip, 
+            'fetched': 0, # Kitne messages check kiye
             'filtered': 0, 
             'deleted': 0, 
             'duplicate': 0, 
-            'total': limit, 
-            'start': 0
+            'last_id': total, # Source channel ka aakhri message ID
+            'total': total,   # UI mein dikhane ke liye total messages
+            'start': tm.time()
         }
-        self.get(full=True)
-        return STS(self.id)
+        return self
         
     def get(self, value=None, full=False):
         """Data fetch karne ke liye."""
@@ -37,54 +41,62 @@ class STS:
         if not values:
             return None
         if not full:
-           return values.get(value)
-        for k, v in values.items():
-            setattr(self, k, v)
-        return self
+           # Mapping for backward compatibility with regix.py
+           mapping = {'FROM': 'FROM', 'TO': 'TO', 'skip': 'skip', 'limit': 'limit', 'total': 'total'}
+           return values.get(mapping.get(value, value))
+           
+        # Object format mein return karna for i.total, i.fetched etc.
+        class DataObject:
+            def __init__(self, d, id):
+                for k, v in d.items():
+                    setattr(self, k, v)
+                self.id = id
+        return DataObject(values, self.id)
 
     def add(self, key=None, value=1, time=False):
-        """Counters (fetched/files) ya start time update karne ke liye."""
+        """Counters update karne ke liye."""
         if self.id not in self.data:
             return
         if time:
-          return self.data[self.id].update({'start': tm.time()})
-        current_val = self.data[self.id].get(key, 0)
-        self.data[self.id].update({key: current_val + value}) 
+            self.data[self.id]['start'] = tm.time()
+            return
+        if key in self.data[self.id]:
+            self.data[self.id][key] += value
     
     def divide(self, no, by):
-       """ETA aur Speed calculation ke liye math helper."""
+       """ETA calculation helper."""
        by = 1 if int(by) == 0 else by 
-       return int(no) / by 
+       return float(no) / by 
     
     async def get_data(self, user_id):
-        """Database se bot aur user settings fetch karta hai."""
+        """Database se settings fetch karna."""
         bot = await db.get_bot(user_id)
         configs = await db.get_configs(user_id)
         filters = await db.get_filters(user_id)
         
         # Duplicate detection setup
-        duplicate = [configs['db_uri'], self.get('TO')] if configs['duplicate'] else False
+        duplicate = [configs['db_uri'], self.get('TO')] if configs.get('duplicate') else False
         
         # Inline buttons parse karna
-        button = parse_buttons(configs['button'] if configs['button'] else '')
+        button = parse_buttons(configs.get('button', ''))
         
         # File size limit check
-        size = [configs['file_size'], configs['size_limit']] if configs['file_size'] != 0 else None
+        size = [configs.get('file_size', 0), configs.get('size_limit')] if configs.get('file_size') != 0 else None
         
         return (
             bot, 
-            configs['caption'], 
-            configs['forward_tag'], 
+            configs.get('caption'), 
+            configs.get('forward_tag'), 
             {
                 'chat_id': self.get('FROM'), 
                 'limit': self.get('limit'), 
                 'offset': self.get('skip'), 
                 'filters': filters,
-                'keywords': configs['keywords'], 
+                'keywords': configs.get('keywords'), 
                 'media_size': size, 
-                'extensions': configs['extension'], 
+                'extensions': configs.get('extension'), 
                 'skip_duplicate': duplicate
             }, 
-            configs['protect'], 
+            configs.get('protect'), 
             button
         )
