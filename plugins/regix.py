@@ -126,7 +126,7 @@ async def core_forward_engine(bot, user, sts, frwd_id, message=None, is_auto=Fal
 
     try:
         pling = 0
-        async for msg in client.iter_messages(sts.get('FROM'), limit=int(sts.get('limit')), offset=int(sts.get('skip'))):
+        async for msg in client.iter_messages(client, sts.get('FROM'), limit=int(sts.get('limit')), offset=int(sts.get('skip'))):
             if await is_cancelled(client, user, m, sts): return
             
             if pling % 10 == 0: 
