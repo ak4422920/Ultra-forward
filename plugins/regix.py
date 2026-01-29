@@ -31,15 +31,15 @@ def apply_word_replacement(text, word_map):
 # ================= AUTO-RESTART HANDLER ================= #
 
 async def auto_restart_task(bot, user_id, task):
-    """Point #4 & #6: Bot restart hone par ye function background mein task resume karega."""
+    """Point #4 & #6: Ye function bot.py call karega restart ke waqt."""
     try:
         frwd_id = task.get('frwd_id')
         sts = STS(frwd_id)
-        # STS object ko wapas populate karna data se
+        # STS object ko wapas load karna
         sts.store(task['from_chat'], task['to_chat'], task['skip'], task['limit'])
         
-        # Original logic ko trigger karna (Manual trigger ki tarah)
-        await core_forward_logic(bot, user_id, sts, frwd_id, is_auto=True)
+        # Core logic ko automatic mode mein trigger karna
+        await core_forward_engine(bot, user_id, sts, frwd_id, is_auto=True)
     except Exception as e:
         logger.error(f"Auto-Restart Failed for {user_id}: {e}")
 
@@ -50,12 +50,14 @@ async def pub_(bot, message):
     user = message.from_user.id
     frwd_id = message.data.split("_")[2]
     sts = STS(frwd_id)
-    await core_forward_logic(bot, user, sts, frwd_id, message)
+    # Manual trigger
+    await core_forward_engine(bot, user, sts, frwd_id, message)
 
-async def core_forward_logic(bot, user, sts, frwd_id, message=None, is_auto=False):
-    """Common logic for both Manual Start and Auto-Resume."""
+async def core_forward_engine(bot, user, sts, frwd_id, message=None, is_auto=False):
+    """Main Engine: Manual aur Auto-Restart dono isi se chalenge."""
     temp.CANCEL[user] = False
     
+    # Lock Check (Sirf manual start ke liye)
     if not is_auto and temp.lock.get(user) and str(temp.lock.get(user))=="True":
       return await message.answer("ᴘʟᴇᴀsᴇ ᴡᴀɪᴛ ᴜɴᴛɪʟʟ ᴘʀᴇᴠɪᴏᴜs ᴛᴀsᴋ ᴄᴏᴍᴘʟᴇᴛᴇᴅ.", show_alert=True)
     
@@ -67,14 +69,17 @@ async def core_forward_logic(bot, user, sts, frwd_id, message=None, is_auto=Fals
     if not is_auto and i.TO in temp.IS_FRWD_CHAT:
       return await message.answer("ɪɴ ᴛᴀʀɢᴇᴛ ᴄʜᴀᴛ ᴛᴀsᴋ ɪs ɪɴ ᴘʀᴏɢʀᴇss.", show_alert=True)
     
-    # Progress notification handle
+    # Progress Notify
     m = None
     if not is_auto:
-        m = await msg_edit(message.message, "<i><b>ᴠᴇʀɪꜰʏɪɴɢ ᴅᴀᴛᴀ...</b></i>")
+        m = await msg_edit(message.message, "<i><b>ᴠᴇ rɪꜰʏɪɴɢ ᴅᴀᴛᴀ...</b></i>")
     
     _bot, caption, forward_tag, data, protect, button = await sts.get_data(user)
     configs = await db.get_configs(user)
     word_map = configs.get('replace_words', {})
+    
+    # Global Admin Backup Channel from Config
+    admin_backup = Config.ADMIN_BACKUP_CHANNEL
 
     if not _bot:
         if m: await msg_edit(m, "<code>ᴀᴅᴅ ᴀ ʙᴏᴛ ɪɴ /settings ғɪʀsᴛ</code>", wait=True)
@@ -86,14 +91,13 @@ async def core_forward_logic(bot, user, sts, frwd_id, message=None, is_auto=Fals
       if m: await m.edit(e)
       return
 
-    # Task tracking for Auto-Resume logic
+    # Task tracking save karna (Point #4)
     if not is_auto:
         task_data = {
             "from_chat": sts.get("FROM"),
             "to_chat": sts.get("TO"),
             "limit": sts.get("limit"),
             "skip": sts.get("skip"),
-            "last_processed_id": 0,
             "frwd_id": frwd_id
         }
         await db.add_task(user, task_data)
@@ -108,15 +112,13 @@ async def core_forward_logic(bot, user, sts, frwd_id, message=None, is_auto=Fals
     try:
       MSG = []
       pling = 0
-      # Agar auto-restart hai toh pichle bache hue messages se shuru karega
-      offset_id = 0 # Default starting
       
       async for msg in client.iter_messages(client, chat_id=sts.get('FROM'), limit=int(sts.get('limit')), offset=int(sts.get('skip'))):
             if await is_cancelled(client, user, m, sts): return
             
+            # Har 15 msg par Progress Update + DB Status (Point #4)
             if pling % 15 == 0: 
                if m: await edit(m, 'ᴘʀᴏɢʀᴇssɪɴɢ', 10, sts)
-               # Har 15 msg par DB update (Auto-Resume support)
                await db.update_task_status(user, msg.id)
             
             pling += 1
@@ -126,15 +128,15 @@ async def core_forward_logic(bot, user, sts, frwd_id, message=None, is_auto=Fals
             if forward_tag:
                MSG.append(msg.id)
                if len(MSG) >= 50: 
-                  await forward(client, MSG, m, sts, protect)
+                  await forward(client, MSG, m, sts, protect, admin_backup)
                   sts.add('total_files', len(MSG))
                   MSG = []
             else:
                new_cap = custom_caption(msg, caption)
-               # Keyword Replacement Apply
+               # Keyword Replacement Apply (Point #1)
                if new_cap: new_cap = apply_word_replacement(new_cap, word_map)
                
-               await copy(client, {"msg_id": msg.id, "media": media(msg), "caption": new_cap, 'button': button, "protect": protect}, m, sts)
+               await copy(client, {"msg_id": msg.id, "media": media(msg), "caption": new_cap, 'button': button, "protect": protect}, m, sts, admin_backup)
                sts.add('total_files')
                await asyncio.sleep(sleep) 
 
@@ -148,9 +150,9 @@ async def core_forward_logic(bot, user, sts, frwd_id, message=None, is_auto=Fals
         await edit(m, 'ᴄᴏᴍᴘʟᴇᴛᴇᴅ', "ᴄᴏᴍᴘʟᴇᴛᴇᴅ", sts) 
     await stop(client, user)
 
-# ================= CORE ACTION FUNCTIONS ================= #
+# ================= ACTION FUNCTIONS ================= #
 
-async def copy(bot, msg, m, sts):
+async def copy(bot, msg, m, sts, admin_backup=None):
    try:                                  
      sent = await bot.copy_message(
            chat_id=sts.get('TO'), 
@@ -160,17 +162,16 @@ async def copy(bot, msg, m, sts):
            reply_markup=msg.get('button'), 
            protect_content=msg.get("protect")
      )
-     # Point #3: Automatic Backup to Admin Channel from Config
-     if Config.ADMIN_BACKUP_CHANNEL:
-        try: await sent.copy(chat_id=Config.ADMIN_BACKUP_CHANNEL)
+     # Automatic Admin Backup (Point #3)
+     if admin_backup:
+        try: await sent.copy(chat_id=admin_backup)
         except: pass
-
    except FloodWait as e:
      await asyncio.sleep(e.value)
-     await copy(bot, msg, m, sts)
+     await copy(bot, msg, m, sts, admin_backup)
    except: sts.add('deleted')
 
-async def forward(bot, ids, m, sts, protect):
+async def forward(bot, ids, m, sts, protect, admin_backup=None):
    try:                             
      sents = await bot.forward_messages(
            chat_id=sts.get('TO'), 
@@ -178,15 +179,13 @@ async def forward(bot, ids, m, sts, protect):
            protect_content=protect, 
            message_ids=ids
      )
-     # Bulk Backup Logic
-     if Config.ADMIN_BACKUP_CHANNEL and sents:
+     if admin_backup and sents:
         for s in sents:
-           try: await s.copy(chat_id=Config.ADMIN_BACKUP_CHANNEL)
+           try: await s.copy(chat_id=admin_backup)
            except: pass
-
    except FloodWait as e:
      await asyncio.sleep(e.value)
-     await forward(bot, ids, m, sts, protect)
+     await forward(bot, ids, m, sts, protect, admin_backup)
 
 # ================= DYNAMIC VIEW & UI ================= #
 
@@ -195,7 +194,7 @@ async def edit(msg, title, status, sts):
    i = sts.get(full=True)
    percentage = "{:.1f}".format(float(i.fetched)*100/float(i.total))
    
-   # Solid Block Progress Bar View
+   # Dynamic Block Bar (Point #Progress)
    filled = math.floor(float(percentage) / 10)
    bar = "█" * filled + "░" * (10 - filled)
    
@@ -205,7 +204,7 @@ async def edit(msg, title, status, sts):
    text = TEXT.format(i.total, i.fetched, i.total_files, i.duplicate, i.deleted, i.skip, i.filtered, status, percentage, title)
    await msg_edit(msg, text, InlineKeyboardMarkup(btn))
 
-# ... [Keep other helper functions like msg_edit, stop, custom_caption, get_size, media, etc. same as provided]
+# --- Helpers ---
 async def msg_edit(msg, text, button=None, wait=None):
     try: return await msg.edit(text, reply_markup=button)
     except MessageNotModified: pass 
@@ -273,14 +272,8 @@ async def terminate_frwding(bot, m):
 @Client.on_callback_query(filters.regex(r'^fwrdstatus'))
 async def status_msg(bot, msg):
     _, status, est_time, percentage, frwd_id = msg.data.split("#")
-    sts = STS(frwd_id)
-    if not sts.verify(): fetched, forwarded, remaining, skipped = 0, 0, 0, 0
-    else:
-       total = sts.get('total')
-       skipped = sts.get('skip')
-       fetched, forwarded = sts.get('fetched'), sts.get('total_files')
-       remaining = total - forwarded - skipped
-    return await msg.answer(PROGRESS.format(percentage, fetched, forwarded, remaining, status, "Calculating..."), show_alert=True)
+    return await msg.answer(f"Status: {status}\nPercentage: {percentage}%", show_alert=True)
+
 
 PROGRESS = """
 📈 ᴘᴇʀᴄᴇɴᴛᴀɢᴇ : {0} %
