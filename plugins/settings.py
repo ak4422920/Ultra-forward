@@ -250,9 +250,7 @@ async def filters_buttons(user_id):
                     callback_data="settings#main")
        ]]
   return InlineKeyboardMarkup(buttons) 
-#Dont Remove My Credit @Silicon_Bot_Update 
-#This Repo Is By @Silicon_Official 
-# For Any Kind Of Error Ask Us In Support Group @Silicon_Botz 
+
 async def next_filters_buttons(user_id):
   filter = await get_configs(user_id)
   filters = filter['filters']
@@ -281,6 +279,3 @@ async def next_filters_buttons(user_id):
        ]]
   return InlineKeyboardMarkup(buttons) 
    
-#Dont Remove My Credit @Silicon_Bot_Update 
-#This Repo Is By @Silicon_Official 
-# For Any Kind Of Error Ask Us In Support Group @Silicon_Botz 
