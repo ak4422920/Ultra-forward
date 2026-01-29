@@ -21,7 +21,7 @@ TEXT = Translation.TEXT
 # ================= HELPER FUNCTIONS ================= #
 
 def apply_word_replacement(text, word_map):
-    """Point #1: Har user ke specific keywords ko change ya remove karta hai."""
+    """Specific keywords ko change ya remove karne ke liye."""
     if not text or not word_map:
         return text
     for old_word, new_word in word_map.items():
@@ -31,17 +31,16 @@ def apply_word_replacement(text, word_map):
 # ================= AUTO-RESTART HANDLER ================= #
 
 async def auto_restart_task(bot, user_id, task):
-    """Point #4 & #6: Ye function bot.py call karega restart ke waqt."""
+    """Restart par pichle ruka hue task ko wahi se shuru karne ke liye."""
     try:
         frwd_id = task.get('frwd_id')
         sts = STS(frwd_id)
-        # STS object ko wapas load karna
-        sts.store(task['from_chat'], task['to_chat'], task['skip'], task['limit'])
-        
-        # Core logic ko automatic mode mein trigger karna
+        # last_processed_id se resume karne ka logic
+        last_id = task.get('last_processed_id', task['skip'])
+        sts.store(task['from_chat'], task['to_chat'], last_id, task['limit'])
         await core_forward_engine(bot, user_id, sts, frwd_id, is_auto=True)
     except Exception as e:
-        logger.error(f"Auto-Restart Failed for {user_id}: {e}")
+        logger.error(f"Auto-Restart Failed: {e}")
 
 # ================= MAIN FORWARDING ENGINE ================= #
 
@@ -117,9 +116,10 @@ async def core_forward_engine(bot, user, sts, frwd_id, message=None, is_auto=Fal
             if await is_cancelled(client, user, m, sts): return
             
             # Har 15 msg par Progress Update + DB Status (Point #4)
-            if pling % 15 == 0: 
-               if m: await edit(m, 'ᴘʀᴏɢʀᴇssɪɴɢ', 10, sts)
-               await db.update_task_status(user, msg.id)
+            # Loop ke andar:
+            if pling % 10 == 0: 
+                if m: await edit_progress(m, 'ᴘʀᴏɢʀᴇssɪɴɢ', 10, sts) # UI update
+                   await db.update_task_status(user, msg.id) # DB mein last ID save karna
             
             pling += 1
             sts.add('fetched')
@@ -154,6 +154,7 @@ async def core_forward_engine(bot, user, sts, frwd_id, message=None, is_auto=Fal
 
 async def copy(bot, msg, m, sts, admin_backup=None):
    try:                                  
+     # Pehle target channel mein message copy hoga
      sent = await bot.copy_message(
            chat_id=sts.get('TO'), 
            from_chat_id=sts.get('FROM'), 
@@ -162,14 +163,22 @@ async def copy(bot, msg, m, sts, admin_backup=None):
            reply_markup=msg.get('button'), 
            protect_content=msg.get("protect")
      )
-     # Automatic Admin Backup (Point #3)
+     
+     # Agar Admin Backup ID set hai, toh wahan copy bhejega
      if admin_backup:
-        try: await sent.copy(chat_id=admin_backup)
-        except: pass
+        try: 
+            await sent.copy(chat_id=admin_backup)
+        except: 
+            pass
+
    except FloodWait as e:
+     # Telegram ki limit aane par wait karke retry karega
      await asyncio.sleep(e.value)
-     await copy(bot, msg, m, sts, admin_backup)
-   except: sts.add('deleted')
+     return await copy(bot, msg, m, sts, admin_backup)
+
+   except Exception: 
+     # Agar message delete ho chuka hai ya koi aur error hai
+     sts.add('deleted')
 
 async def forward(bot, ids, m, sts, protect, admin_backup=None):
    try:                             
@@ -196,7 +205,8 @@ async def edit(msg, title, status, sts):
    
    # Dynamic Block Bar (Point #Progress)
    filled = math.floor(float(percentage) / 10)
-   bar = "█" * filled + "░" * (10 - filled)
+bar = "█" * filled + "░" * (10 - filled)
+# Ab 'bar' variable ko apne InlineButton ke text mein use kar lo
    
    btn = [[InlineKeyboardButton(f"[{bar}] {percentage}%", callback_data="none")]]
    btn.append([InlineKeyboardButton('• ᴄᴀɴᴄᴇʟ', 'terminate_frwd')])
