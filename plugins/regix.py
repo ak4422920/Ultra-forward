@@ -18,49 +18,183 @@ CLIENT_OBJ = CLIENT()
 logger = logging.getLogger(__name__)
 TEXT = Translation.TEXT
 
-PROGRESS_TEMPLATE = """
-📈 **ᴘᴇʀᴄᴇɴᴛᴀɢᴇ :** {0} %
-⭕ **ғᴇᴛᴄʜᴇᴅ :** {1}
-⚙️ **ғᴏʀᴡᴀʀᴅᴇᴅ :** {2}
-🗞️ **ʀᴇᴍᴀɴɪɴɢ :** {3}
-♻️ **sᴛᴀᴛᴜs :** {4}
-⏳️ **ᴇᴛᴀ :** {5}
-"""
-
 # ================= HELPER FUNCTIONS ================= #
 
 def apply_word_replacement(text, word_map):
-    if not text or not word_map:
-        return text
+    if not text or not word_map: return text
     for old_word, new_word in word_map.items():
         text = text.replace(old_word, new_word)
     return text
 
-def TimeFormatter(milliseconds: int) -> str:
-    seconds, milliseconds = divmod(int(milliseconds), 1000)
-    minutes, seconds = divmod(seconds, 60)
-    hours, minutes = divmod(minutes, 60)
-    days, hours = divmod(hours, 24)
-    tmp = ((str(days) + "d, ") if days else "") + \
-        ((str(hours) + "h, ") if hours else "") + \
-        ((str(minutes) + "m, ") if minutes else "") + \
-        ((str(seconds) + "s, ") if seconds else "")
-    return tmp[:-2] if tmp else "0s"
+# ================= MAIN FORWARDING ENGINE ================= #
 
-def get_size(size):
-    units = ["Bytes", "KB", "MB", "GB", "TB"]
-    size = float(size)
-    i = 0
-    while size >= 1024.0 and i < len(units)-1:
-        i += 1
-        size /= 1024.0
-    return "%.2f %s" % (size, units[i])
+@Client.on_callback_query(filters.regex(r'^start_public'))
+async def pub_(bot, message):
+    user = message.from_user.id
+    frwd_id = message.data.split("_")[2]
+    sts = STS(frwd_id)
+    await core_forward_engine(bot, user, sts, frwd_id, message)
 
-def media(msg):
-    if msg.media:
-        media_obj = getattr(msg, msg.media.value, None)
-        return getattr(media_obj, 'file_id', None)
-    return None
+async def core_forward_engine(bot, user, sts, frwd_id, message=None, is_auto=False):
+    temp.CANCEL[user] = False
+    
+    # 🔒 Problem #04: Lock Check
+    if not is_auto and temp.lock.get(user):
+        return await message.answer("ᴘʟᴇᴀsᴇ ᴡᴀɪᴛ ᴜɴᴛɪʟʟ ᴘʀᴇᴠɪᴏᴜs ᴛᴀsᴋ ᴄᴏᴍᴘʟᴇᴛᴇᴅ.", show_alert=True)
+    
+    if not sts.verify():
+        if not is_auto: await message.answer("ʏᴏᴜ ᴀʀᴇ ᴄʟɪᴄᴋɪɴɢ ᴏɴ ᴀɴ ᴏʟᴅ ʙᴜᴛᴛᴏɴ.", show_alert=True)
+        return
+    
+    i = sts.get(full=True)
+    m = None if is_auto else await msg_edit(message.message, "<i><b>ᴠᴇʀɪꜰʏɪɴɢ ᴅᴀᴛᴀ...</b></i>")
+    
+    _bot, caption, forward_tag, data, protect, button = await sts.get_data(user)
+    configs = await db.get_configs(user)
+    
+    # Engine Settings
+    word_map = configs.get('replace_words', {})
+    size_limit = configs.get('file_size', 0) * 1024 * 1024 # Convert MB to Bytes
+    banned_extensions = configs.get('extension', [])
+    allowed_keywords = configs.get('keywords', [])
+    admin_backup = Config.ADMIN_BACKUP_CHANNEL
+
+    try:
+        client = await start_clone_bot(CLIENT_OBJ.client(_bot))
+        temp.lock[user] = True
+        temp.IS_FRWD_CHAT.append(i.TO)
+        sts.add(time=True)
+
+        # 🎯 Problem #02 & #05: Smart Limit Calculation
+        total_in_channel = int(sts.get('total'))
+        skip_val = int(sts.get('skip'))
+        actual_total = total_in_channel - skip_val
+        
+        user_limit = int(sts.get('limit'))
+        f_limit = min(user_limit, actual_total) if user_limit > 0 else actual_total
+
+        if f_limit <= 0:
+            if m: await msg_edit(m, "❌ **Error:** Skip value total messages se zyada hai!")
+            return
+
+        pling = 0
+        async for msg in client.iter_messages(sts.get('FROM'), limit=f_limit, offset=skip_val):
+            if await is_cancelled(client, user, m, sts): return
+            
+            # 📈 Problem #01: Correct Progress Update
+            if pling % 10 == 0: 
+                if m: await edit(m, 'ᴘʀᴏɢʀᴇssɪɴɢ', 10, sts)
+                await db.update_task_status(user, msg.id)
+            
+            pling += 1
+            sts.add('fetched')
+            if msg.empty or msg.service: continue
+
+            # --- 🔍 SMART FILTERS (Size, Ext, Keywords) ---
+            if msg.media:
+                media_obj = getattr(msg, msg.media.value, None)
+                if media_obj:
+                    # 1. Size Limit Filter
+                    if size_limit > 0 and getattr(media_obj, 'file_size', 0) > size_limit:
+                        sts.add('filtered'); continue
+                    
+                    # 2. Extension Filter
+                    file_name = getattr(media_obj, 'file_name', '').lower()
+                    if banned_extensions and any(file_name.endswith(ext.lower()) for ext in banned_extensions):
+                        sts.add('filtered'); continue
+                    
+                    # 3. Keyword Filter
+                    if allowed_keywords and not any(word.lower() in file_name for word in allowed_keywords):
+                        sts.add('filtered'); continue
+
+            # --- FORWARDING LOGIC ---
+            if forward_tag:
+                try:
+                    sent = await client.forward_messages(sts.get('TO'), sts.get('FROM'), [msg.id], protect_content=protect)
+                    if admin_backup: await sent[0].copy(admin_backup)
+                    sts.add('total_files')
+                except: sts.add('deleted')
+            else:
+                new_cap = apply_word_replacement(custom_caption(msg, caption), word_map)
+                await copy(client, {"msg_id": msg.id, "media": media(msg), "caption": new_cap, 'button': button, "protect": protect}, m, sts, admin_backup)
+                sts.add('total_files')
+            
+            await asyncio.sleep(1 if _bot['is_bot'] else 5) 
+
+    except Exception as e:
+        logger.error(f"Engine Crash: {e}")
+        if m: await msg_edit(m, f'<b>ERROR:</b>\n`{e}`', wait=True)
+    
+    finally:
+        # 🔓 Problem #04: Bulletproof Unlock
+        temp.lock[user] = False 
+        if i.TO in temp.IS_FRWD_CHAT: temp.IS_FRWD_CHAT.remove(i.TO)
+        await db.remove_task(user)
+        if not is_auto:
+            await send(client, user, "<b>🎉 ғᴏʀᴡᴀᴅɪɴɢ ᴄᴏᴍᴘʟᴇᴛᴇᴅ</b>")
+            await edit(m, 'ᴄᴏᴍᴘʟᴇᴛᴇᴅ', "ᴄᴏᴍᴘʟᴇᴛᴇᴅ", sts) 
+        await stop(client, user)
+
+# ================= UI & ACTION HELPERS ================= #
+
+async def edit(msg, title, status, sts):
+    if not msg: return
+    i = sts.get(full=True)
+    
+    # 📈 Formula: (Fetched / (Total - Skip)) * 100
+    actual_total = int(i.total) - int(i.skip)
+    if actual_total <= 0: actual_total = 1
+    percentage = "{:.1f}".format(float(i.fetched) * 100 / actual_total)
+    
+    filled_blocks = math.floor(float(percentage) / 10)
+    bar = "█" * filled_blocks + "░" * (10 - filled_blocks)
+    
+    status_text = 'ғᴏʀᴡᴀʀᴅɪɴɢ' if status == 10 else status
+    button = [[InlineKeyboardButton(f"[{bar}] {percentage}%", callback_data=f"none")]]
+    
+    if status in ["ᴄᴀɴᴄᴇʟʟᴇᴅ", "ᴄᴏᴍᴘʟᴇᴛᴇᴅ"]:
+        button.append([InlineKeyboardButton('💠 ᴜᴘᴅᴀᴛᴇ ᴄʜᴀɴɴᴇʟ', url='https://t.me/Silicon_Official')])
+    else:
+        button.append([InlineKeyboardButton('• ᴄᴀɴᴄᴇʟ', 'terminate_frwd')])
+    
+    text = TEXT.format(i.total, i.fetched, i.total_files, i.duplicate, i.deleted, i.skip, i.filtered, status_text, percentage, title)
+    await msg_edit(msg, text, InlineKeyboardMarkup(button))
+
+async def copy(bot, msg, m, sts, admin_backup=None):
+    try:                                  
+        sent = await bot.copy_message(
+            chat_id=sts.get('TO'), from_chat_id=sts.get('FROM'), 
+            caption=msg.get("caption"), message_id=msg.get("msg_id"), 
+            reply_markup=msg.get('button'), protect_content=msg.get("protect")
+        )
+        if admin_backup:
+            try: await sent.copy(chat_id=admin_backup)
+            except: pass
+    except FloodWait as e:
+        await asyncio.sleep(e.value); return await copy(bot, msg, m, sts, admin_backup)
+    except: sts.add('deleted')
+
+async def msg_edit(msg, text, button=None, wait=None):
+    try: return await msg.edit(text, reply_markup=button)
+    except MessageNotModified: pass 
+    except FloodWait as e:
+        if wait: await asyncio.sleep(e.value); return await msg_edit(msg, text, button, wait)
+
+async def is_cancelled(client, user, msg, sts):
+    if temp.CANCEL.get(user):
+        if msg: await edit(msg, "ᴄᴀɴᴄᴇʟʟᴇᴅ", "ᴄᴏᴍᴘʟᴇᴛᴇᴅ", sts)
+        return True 
+    return False 
+
+async def stop(client, user):
+    try: await client.stop()
+    except: pass 
+    await db.rmve_frwd(user)
+    temp.lock[user] = False 
+
+async def send(bot, user, text):
+    try: await bot.send_message(user, text=text)
+    except: pass 
 
 def custom_caption(msg, caption):
     if msg.media:
@@ -77,230 +211,15 @@ def custom_caption(msg, caption):
             return fcaption
     return None
 
-# ================= AUTO-RESTART HANDLER ================= #
+def get_size(size):
+    units = ["Bytes", "KB", "MB", "GB", "TB"]
+    size = float(size)
+    i = 0
+    while size >= 1024.0 and i < len(units)-1:
+        i += 1; size /= 1024.0
+    return "%.2f %s" % (size, units[i])
 
-async def auto_restart_task(bot, user_id, task):
-    try:
-        frwd_id = task.get('frwd_id')
-        sts = STS(frwd_id)
-        last_id = task.get('last_processed_id', task['skip'])
-        sts.store(task['from_chat'], task['to_chat'], last_id, task['limit'], task['limit'])
-        await core_forward_engine(bot, user_id, sts, frwd_id, is_auto=True)
-    except Exception as e:
-        logger.error(f"Auto-Restart Failed: {e}")
-
-# ================= MAIN FORWARDING ENGINE ================= #
-
-@Client.on_callback_query(filters.regex(r'^start_public'))
-async def pub_(bot, message):
-    user = message.from_user.id
-    frwd_id = message.data.split("_")[2]
-    sts = STS(frwd_id)
-    await core_forward_engine(bot, user, sts, frwd_id, message)
-
-async def core_forward_engine(bot, user, sts, frwd_id, message=None, is_auto=False):
-    temp.CANCEL[user] = False
-    
-    if not is_auto and temp.lock.get(user) and str(temp.lock.get(user))=="True":
-        return await message.answer("ᴘʟᴇᴀsᴇ ᴡᴀɪᴛ ᴜɴᴛɪʟʟ ᴘʀᴇᴠɪᴏᴜs ᴛᴀsᴋ ᴄᴏᴍᴘʟᴇᴛᴇᴅ.", show_alert=True)
-    
-    if not sts.verify():
-        if not is_auto: await message.answer("ʏᴏᴜ ᴀʀᴇ ᴄʟɪᴄᴋɪɴɢ ᴏɴ ᴀɴ ᴏʟᴅ ʙᴜᴛᴛᴏɴ.", show_alert=True)
-        return
-    
-    i = sts.get(full=True)
-    if not is_auto and i.TO in temp.IS_FRWD_CHAT:
-        return await message.answer("ɪɴ ᴛᴀʀɢᴇᴛ ᴄʜᴀᴛ ᴛᴀsᴋ ɪs ɪɴ ᴘʀᴏɢʀᴇss.", show_alert=True)
-    
-    m = None if is_auto else await msg_edit(message.message, "<i><b>ᴠᴇʀɪꜰʏɪɴɢ ᴅᴀᴛᴀ...</b></i>")
-    
-    _bot, caption, forward_tag, data, protect, button = await sts.get_data(user)
-    configs = await db.get_configs(user)
-    word_map = configs.get('replace_words', {})
-    admin_backup = Config.ADMIN_BACKUP_CHANNEL
-
-    try:
-        client = await start_clone_bot(CLIENT_OBJ.client(_bot))
-    except Exception as e:  
-        if m: await m.edit(f"<b>Client Error:</b>\n`{e}`")
-        return
-
-    if not is_auto:
-        await db.add_task(user, {
-            "from_chat": sts.get("FROM"), "to_chat": sts.get("TO"),
-            "limit": sts.get("limit"), "skip": sts.get("skip"),
-            "frwd_id": frwd_id, "last_processed_id": sts.get("skip")
-        })
-
-    temp.forwardings += 1
-    await db.add_frwd(user)
-    sts.add(time=True)
-    sleep_time = 1 if _bot['is_bot'] else 5
-    temp.IS_FRWD_CHAT.append(i.TO)
-    temp.lock[user] = True
-
-    try:
-        pling = 0
-        # FIX: Limit 0 logic (0 means unlimited)
-        f_limit = int(sts.get('limit'))
-        if f_limit <= 0:
-            f_limit = 1000000 # Set a very high number for unlimited
-            
-        # FIX: chat_id positional argument error fixed
-        async for msg in client.iter_messages(sts.get('FROM'), limit=f_limit, offset=int(sts.get('skip'))):
-            if await is_cancelled(client, user, m, sts): return
-            
-            if pling % 10 == 0: 
-                if m: await edit(m, 'ᴘʀᴏɢʀᴇssɪɴɢ', 10, sts)
-                await db.update_task_status(user, msg.id)
-            
-            pling += 1
-            sts.add('fetched')
-            if msg.empty or msg.service: continue
-            
-            if forward_tag:
-                try:
-                    sent = await client.forward_messages(sts.get('TO'), sts.get('FROM'), [msg.id], protect_content=protect)
-                    if admin_backup: await sent[0].copy(admin_backup)
-                except: pass
-                sts.add('total_files')
-            else:
-                new_cap = apply_word_replacement(custom_caption(msg, caption), word_map)
-                await copy(client, {"msg_id": msg.id, "media": media(msg), "caption": new_cap, 'button': button, "protect": protect}, m, sts, admin_backup)
-                sts.add('total_files')
-            await asyncio.sleep(sleep_time) 
-
-        # Agar loop ke bahar aa gaya aur kuch fetch nahi hua
-        if pling == 0:
-            if m: await msg_edit(m, "<b>❌ No messages found!</b>\nCheck if your Skip value is higher than total messages.", wait=True)
-
-    except Exception as e:
-        if m: await msg_edit(m, f'<b>ERROR IN ENGINE:</b>\n`{e}`', wait=True)
-    
-    await db.remove_task(user)
-    if i.TO in temp.IS_FRWD_CHAT: temp.IS_FRWD_CHAT.remove(i.TO)
-    if not is_auto:
-        await send(client, user, "<b>🎉 ғᴏʀᴡᴀᴅɪɴɢ ᴄᴏᴍᴘʟᴇᴛᴇᴅ</b>")
-        await edit(m, 'ᴄᴏᴍᴘʟᴇᴛᴇᴅ', "ᴄᴏᴍᴘʟᴇᴛᴇᴅ", sts) 
-    await stop(client, user)
-
-# ================= ACTION FUNCTIONS ================= #
-
-async def copy(bot, msg, m, sts, admin_backup=None):
-    try:                                  
-        sent = await bot.copy_message(
-            chat_id=sts.get('TO'), from_chat_id=sts.get('FROM'), 
-            caption=msg.get("caption"), message_id=msg.get("msg_id"), 
-            reply_markup=msg.get('button'), protect_content=msg.get("protect")
-        )
-        if admin_backup:
-            try: await sent.copy(chat_id=admin_backup)
-            except: pass
-    except FloodWait as e:
-        await asyncio.sleep(e.value)
-        return await copy(bot, msg, m, sts, admin_backup)
-    except: sts.add('deleted')
-
-async def forward(bot, ids, m, sts, protect, admin_backup=None):
-    try:                             
-        sents = await bot.forward_messages(
-            chat_id=sts.get('TO'), from_chat_id=sts.get('FROM'), 
-            protect_content=protect, message_ids=ids
-        )
-        if admin_backup and sents:
-            for s in sents:
-                try: await s.copy(chat_id=admin_backup)
-                except: pass
-    except FloodWait as e:
-        await asyncio.sleep(e.value)
-        await forward(bot, ids, m, sts, protect, admin_backup)
-
-# ================= UI FUNCTIONS ================= #
-
-async def edit(msg, title, status, sts):
-    if not msg: return
-    i = sts.get(full=True)
-    
-    # Logic to handle 0 total messages for percentage
-    total_val = int(i.total) if int(i.total) > 0 else 1
-    percentage = "{:.1f}".format(float(i.fetched)*100/total_val)
-    
-    now = time.time()
-    diff = int(now - i.start)
-    speed = sts.divide(i.fetched, diff)
-    elapsed_time = round(diff) * 1000
-    time_to_completion = round(sts.divide(total_val - i.fetched, int(speed))) * 1000
-    estimated_total_time = elapsed_time + time_to_completion  
-    
-    filled_blocks = math.floor(float(percentage) / 10)
-    bar = "█" * filled_blocks + "░" * (10 - filled_blocks)
-    
-    status_text = 'ғᴏʀᴡᴀʀᴅɪɴɢ' if status == 10 else status
-    button = [[InlineKeyboardButton(f"[{bar}] {percentage}%", callback_data=f"fwrdstatus#{status_text}#{estimated_total_time}#{percentage}#{i.id}")]]
-    
-    if status in ["ᴄᴀɴᴄᴇʟʟᴇᴅ", "ᴄᴏᴍᴘʟᴇᴛᴇᴅ"]:
-        button.append([InlineKeyboardButton('💠 ᴜᴘᴅᴀᴛᴇ ᴄʜᴀɴɴᴇʟ', url='https://t.me/AkMovieVerse')])
-    else:
-        button.append([InlineKeyboardButton('• ᴄᴀɴᴄᴇʟ', 'terminate_frwd')])
-    
-    text = TEXT.format(i.total, i.fetched, i.total_files, i.duplicate, i.deleted, i.skip, i.filtered, status_text, percentage, title)
-    await msg_edit(msg, text, InlineKeyboardMarkup(button))
-
-async def msg_edit(msg, text, button=None, wait=None):
-    try: return await msg.edit(text, reply_markup=button)
-    except MessageNotModified: pass 
-    except FloodWait as e:
-        if wait:
-            await asyncio.sleep(e.value)
-            return await msg_edit(msg, text, button, wait)
-
-async def is_cancelled(client, user, msg, sts):
-    if temp.CANCEL.get(user):
-        target_chat = sts.get('TO')
-        if target_chat in temp.IS_FRWD_CHAT: temp.IS_FRWD_CHAT.remove(target_chat)
-        if msg: await edit(msg, "ᴄᴀɴᴄᴇʟʟᴇᴅ", "ᴄᴏᴍᴘʟᴇᴛᴇᴅ", sts)
-        await stop(client, user)
-        return True 
-    return False 
-
-async def stop(client, user):
-    try: await client.stop()
-    except: pass 
-    await db.rmve_frwd(user)
-    temp.forwardings -= 1
-    temp.lock[user] = False 
-
-async def send(bot, user, text):
-    try: await bot.send_message(user, text=text)
-    except: pass 
-
-# ================= CALLBACKS & COMMANDS ================= #
-
-@Client.on_callback_query(filters.regex(r'^terminate_frwd$'))
-async def terminate_frwding(bot, m):
-    temp.lock[m.from_user.id] = False
-    temp.CANCEL[m.from_user.id] = True 
-    await m.answer("ғᴏʀᴡᴀʀᴅɪɴɢ ᴄᴀɴᴄᴇʟʟᴇᴅ !", show_alert=True) 
-
-@Client.on_callback_query(filters.regex(r'^fwrdstatus'))
-async def status_msg(bot, msg):
-    _, status, est_time, percentage, frwd_id = msg.data.split("#")
-    sts = STS(frwd_id)
-    i = sts.get(full=True)
-    remaining = int(i.total) - int(i.fetched)
-    text = PROGRESS_TEMPLATE.format(percentage, i.fetched, i.total_files, remaining, status, TimeFormatter(est_time))
-    return await msg.answer(text, show_alert=True)
-
-@Client.on_message(filters.command("stop") & filters.private)
-async def stop_forwarding(bot, message):
-    user_id = message.from_user.id
-    if temp.lock.get(user_id):
-        temp.lock[user_id] = False
-        temp.CANCEL[user_id] = True
-        await message.reply("🛑 **ғᴏʀᴡᴀʀᴅɪɴɢ sᴛᴏᴘᴘᴇᴅ!**", quote=True)
-    else:
-        await message.reply("❌ **ɴᴏ ᴏɴɢᴏɪɴɢ ᴛᴀsᴋ.**", quote=True)
-
-@Client.on_callback_query(filters.regex(r'^close_btn$'))
-async def close(bot, update):
-    await update.message.delete()
+def media(msg):
+    if msg.media:
+        return getattr(getattr(msg, msg.media.value, None), 'file_id', None)
+    return None
