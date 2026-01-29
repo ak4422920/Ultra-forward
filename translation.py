@@ -1,169 +1,108 @@
-#Dont Remove My Credit @Silicon_Bot_Update 
-#This Repo Is By @Silicon_Official 
-# For Any Kind Of Error Ask Us In Support Group @Silicon_Botz 
-
 import os
 from config import Config
 
 class Translation(object):
   START_TXT = """<b>ʜɪ {}
 
-ɪ'ᴍ ᴀ ᴀᴅᴠᴀɴᴄᴇᴅ ᴀᴜᴛᴏ ꜰᴏʀᴡᴀʀᴅ ʙᴏᴛ
-ɪ ᴄᴀɴ ꜰᴏʀᴡᴀʀᴅ ᴀʟʟ ᴍᴇssᴀɢᴇ ꜰʀᴏᴍ ᴏɴᴇ ᴄʜᴀɴɴᴇʟ ᴛᴏ ᴀɴᴏᴛʜᴇʀ ᴄʜᴀɴɴᴇʟ
+ɪ'ᴍ ᴀɴ ᴀᴅᴠᴀɴᴄᴇᴅ ᴀᴜᴛᴏ ꜰᴏʀᴡᴀʀᴅ ʙᴏᴛ (ᴠ𝟹)
+ɪ ᴄᴀɴ ꜰᴏʀᴡᴀʀᴅ ᴍᴇssᴀɢᴇs ꜰʀᴏᴍ ᴀɴʏ ᴄʜᴀɴɴᴇʟ ᴛᴏ ᴀɴᴏᴛʜᴇʀ ᴡɪᴛʜ ᴘᴇʀsɪsᴛᴇɴᴛ ᴀᴜᴛᴏ-ʀᴇsᴜᴍᴇ ᴘᴏᴡᴇʀ.
 
-ᴄʟɪᴄᴋ ʜᴇʟᴘ ʙᴜᴛᴛᴏɴ ᴛᴏ ᴋɴᴏᴡ ᴍᴏʀᴇ ᴀʙᴏᴜᴛ ᴍᴇ</b>"""
+ᴄʟɪᴄᴋ ʜᴇʟᴘ ʙᴜᴛᴛᴏɴ ᴛᴏ ᴋɴᴏᴡ ᴍᴏʀᴇ ᴀʙᴏᴜᴛ ᴍʏ sᴜᴘᴇʀᴘᴏᴡᴇʀs!</b>"""
 
+  HELP_TXT = """<b><u>🔆 ʜᴇʟᴘ ᴍᴇɴᴜ</b></u>
 
-  DONATE_TXT = """<b><i>If you liked me ❤️. consider make a donation to support my developer 👦
+<b>📚 Commands:</b>
+⏣ /start - Check if I'm alive
+⏣ /forward - Start forwarding messages
+⏣ /unequify - Remove duplicates in channels
+⏣ /settings - Configure Keyword Mapping, Thumb, & Backup
+⏣ /reset - Reset all configurations
+⏣ /stop - Cancel ongoing task
 
-UPI ID - </i></b><code>connect with owner </code>"""
-
-  HELP_TXT = """<b><u>🔆 ʜᴇʟᴘ</b></u>
-
-<u>**📚 Available Commands:**</u>
-
-<b>⏣ __/start - Check I'm alive__ 
-⏣ __/forward - Forward messages__
-⏣ __/unequify - Delete duplicate messages in channels__
-⏣ __/settings - Configure your settings__
-⏣ __/reset - Reset your settings__
-⏣ __/donate - Donate to developer__
-⏣ __/stop - Cancel your ongoing forwarding__</b>
-
-<b><u>💢 Features:</b></u>
-<b>► __Forward message from public channel to your channel without admin permission. if the channel is private need admin permission__
-► __Forward message from private channel to your channel by using userbot(user must be member in there)__
-► __Custom caption__
-► __Custom button__
-► __Support restricted chats__
-► __Skip duplicate messages__
-► __Filter type of messages__
-► __Skip messages based on extensions & keywords & size__</b>
+<b>💢 Pro Features:</b>
+► <b>Auto-Resume:</b> Task resumes automatically after bot restart.
+► <b>Keyword Mapper:</b> Change or remove specific words from captions.
+► <b>Admin Backup:</b> Automatically copy all files to your backup channel.
+► <b>Dynamic Bar:</b> Modern solid-block progress tracking.
+► <b>Restricted Support:</b> Forward even from restricted chats.
 """
-#Dont Remove My Credit @Silicon_Bot_Update 
-#This Repo Is By @Silicon_Official 
-# For Any Kind Of Error Ask Us In Support Group @Silicon_Botz
   
-  HOW_USE_TXT = """<b><u>⚠️ Before Forwarding:</b></u>
-<b>► __add a bot or userbot__
-► __add atleast one to channel__ `(your bot/userbot must be admin in there)`
-► __You can add chats or bots by using /settings__
-► __if the **From Channel** is private your userbot must be member in there or your bot must need admin permission in there also__
-► __Then use /forward to forward messages__</b>"""
+  HOW_USE_TXT = """<b><u>⚠️ Setup Guide:</b></u>
+1. Add a Bot (via Token) or Userbot (via Login/Session) in /settings.
+2. Set your Target Channel in /settings (Bot/Userbot must be admin).
+3. (Optional) Set Keyword Mapping & Backup Channel in /settings.
+4. Use /forward, provide source link, and start.
 
-#Dont Remove My Credit @Silicon_Bot_Update 
-#This Repo Is By @Silicon_Official 
-# For Any Kind Of Error Ask Us In Support Group @Silicon_Botz 
-  
+<b><u>🚫 Anti-Ban Warning:</b></u>
+Telegram filters are strict. Use accounts older than 3 months and set Two-Step Verification (2FA) before logging in here to avoid account deletion.</b>"""
+
   ABOUT_TXT = """<b>
-╔════❰ ғᴏʀᴡᴀʀᴅ ʙᴏᴛ ❱═❍⊱❁
+╔════❰ ᴀᴅᴠᴀɴᴄᴇᴅ ꜰᴏʀᴡᴀʀᴅ ʙᴏᴛ ❱═❍⊱❁
 ║╭━━━━━━━━━━━━━━━➣
-║┣⪼📃ʙᴏᴛ : ғᴏʀᴡᴀʀᴅ ʙᴏᴛ
-║┣⪼👦ᴄʀᴇᴀᴛᴏʀ : ᴅᴇᴠᴇʟᴏᴘᴇʀ
-║┣⪼📡ʜᴏsᴛᴇᴅ ᴏɴ : ʀᴏᴋᴜ
-║┣⪼🗣️ʟᴀɴɢᴜᴀɢᴇ : ᴘʏᴛʜᴏɴ3
-║┣⪼📚ʟɪʙʀᴀʀʏ : ᴘʏʀᴏɢʀᴀᴍ
-║┣⪼🗒️ᴠᴇʀsɪᴏɴ : 1.0.6
+║┣⪼📃 ʙᴏᴛ : ғᴏʀᴡᴀʀᴅ ᴇʟɪᴛᴇ ᴠ𝟹
+║┣⪼👦 ᴏᴡɴᴇʀ : ᴀᴅᴍɪɴ
+║┣⪼🗣️ ʟᴀɴɢᴜᴀɢᴇ : ᴘʏᴛʜᴏɴ3
+║┣⪼📚 ʟɪʙʀᴀʀʏ : ᴘʏʀᴏɢʀᴀᴍ
+║┣⪼🗒️ ᴠᴇʀsɪᴏɴ : 3.0.0 (sᴛᴀʙʟᴇ)
 ║╰━━━━━━━━━━━━━━━➣
 ╚══════════════════❍⊱❁</b>"""
 
-#Dont Remove My Credit @Silicon_Bot_Update 
-#This Repo Is By @Silicon_Official 
-# For Any Kind Of Error Ask Us In Support Group @Silicon_Botz 
-  
   STATUS_TXT = """<b>
 ╔════❰ ʙᴏᴛ sᴛᴀᴛᴜs  ❱═❍⊱❁
 ║╭━━━━━━━━━━━━━━━➣
-║┣⪼👱 ᴛᴏᴛᴀʟ  ᴜsᴇʀs : <code>{}</code>
+║┣⪼👱 ᴛᴏᴛᴀʟ ᴜsᴇʀs : <code>{}</code>
 ║┃
-║┣⪼🤖 ᴛᴏᴛᴀʟ ʙᴏᴛ : <code>{}</code>
+║┣⪼🤖 ᴛᴏᴛᴀʟ ʙᴏᴛs : <code>{}</code>
 ║┃
-║┣⪼🔃 ғᴏʀᴡᴀʀᴅɪɴɢs : <code>{}</code>
-║┃
-║┣⪼🔍 ᴜɴᴇǫᴜɪꜰʏɪɴɢs: <code>0</code>
+║┣⪼🔃 ᴀᴄᴛɪᴠᴇ ᴛᴀsᴋs : <code>{}</code>
 ║╰━━━━━━━━━━━━━━━➣
 ╚══════════════════❍⊱❁</b>""" 
-
-  SERVER_TXT = """<b>
-╔════❰ sᴇʀᴠᴇʀ sᴛᴀᴛs  ❱═❍⊱❁۪۪
-║╭━━━━━━━━━━━━━━━➣
-║┣⪼ ᴛᴏᴛᴀʟ ᴅɪsᴋ sᴘᴀᴄᴇ: <code>38 GB</code>
-║┣⪼ ᴜsᴇᴅ: <code>1.54 GB</code>
-║┣⪼ ꜰʀᴇᴇ: <code>36.46 GB</code>
-║┣⪼ ᴄᴘᴜ: <code>{}%</code>
-║┣⪼ ʀᴀᴍ: <code>{}%</code>
-║╰━━━━━━━━━━━━━━━➣
-╚══════════════════❍⊱❁۪۪</b>"""
   
-  FROM_MSG = "<b>❪ SET SOURCE CHAT ❫\n\nForward the last message or last message link of source chat.\n/cancel - cancel this process</b>"
+  FROM_MSG = "<b>❪ SET SOURCE ❫\n\nForward a message or send link from source chat.\n/cancel - To Cancel.</b>"
 
-  TO_MSG = "<b>❪ CHOOSE TARGET CHAT ❫\n\nChoose your target chat from the given buttons.\n/cancel - Cancel this process</b>"
+  TO_MSG = "<b>❪ TARGET CHAT ❫\n\nChoose target from buttons.\n/cancel - To Cancel.</b>"
 
-  SKIP_MSG = "<b><u>sᴇᴛ ɴᴏ. ᴏғ ᴍᴇssᴀɢᴇs ᴛᴏ sᴋɪᴘ 📃</u></b>\n\n<b>You can skip a certain number of messages and forward the rest.\n\nDefault Skip Number = 0</b>\n\n<b><i>Example: If you enter 0, no messages will be skipped.\nIf you enter 5, the first 5 messages will be skipped.</i></b>\n/cancel <b>- cancel this process</b>"
+  SKIP_MSG = "<b><u>sᴋɪᴘ ᴍᴇssᴀɢᴇs 📃</u></b>\n\nDefault = 0. Example: Enter 10 to skip first 10 messages.\n/cancel - To Cancel."
 
-  CANCEL = "<b>Process Cancelled Succefully !</b>"
+  CANCEL = "<b>❌ Process Cancelled Successfully!</b>"
 
-#Dont Remove My Credit @Silicon_Bot_Update 
-#This Repo Is By @Silicon_Official 
-# For Any Kind Of Error Ask Us In Support Group @Silicon_Botz 
+  BOT_DETAILS = "<b><u>📄 BOT DETAILS</b></u>\n\n<b>➣ NAME:</b> <code>{}</code>\n<b>➣ ID:</b> <code>{}</code>\n<b>➣ USER:</b> @{}"
 
-  BOT_DETAILS = "<b><u>📄 BOT DETAILS</b></u>\n\n<b>➣ NAME:</b> <code>{}</code>\n<b>➣ BOT ID:</b> <code>{}</code>\n<b>➣ USERNAME:</b> @{}"
-
-  USER_DETAILS = "<b><u>📄 USERBOT DETAILS</b></u>\n\n<b>➣ NAME:</b> <code>{}</code>\n<b>➣ USER ID:</b> <code>{}</code>\n<b>➣ USERNAME:</b> @{}"  
+  USER_DETAILS = "<b><u>📄 USERBOT DETAILS</b></u>\n\n<b>➣ NAME:</b> <code>{}</code>\n<b>➣ ID:</b> <code>{}</code>\n<b>➣ USER:</b> @{}"  
          
-  TEXT = """<b>╔════❰ ғᴏʀᴡᴀʀᴅ sᴛᴀᴛᴜs  ❱═❍⊱❁
+  # Upgraded Text for Progress with Dynamic Bar Support
+  TEXT = """<b>╔════❰ ꜰᴏʀᴡᴀʀᴅɪɴɢ sᴛᴀᴛᴜs ❱═❍⊱❁
 ║╭━━━━━━━━━━━━━━━➣
-║┣⪼<b>𖨠 ᴛᴏᴛᴀʟ ᴍᴇssᴀɢᴇs: </b> <code>{}</code>
+║┣⪼ ᴛᴏᴛᴀʟ: <code>{}</code>
+║┣⪼ ꜰᴇᴛᴄʜᴇᴅ: <code>{}</code>
+║┣⪼ ꜰᴏʀᴡᴀʀᴅᴇᴅ: <b>{}</b>
 ║┃
-║┣⪼<b>𖨠 ғᴇᴄʜᴇᴅ ᴍᴇssᴀɢᴇs: </b> <code>{}</code>
+║┣⪼ ᴅᴜᴘʟɪᴄᴀᴛᴇ: <code>{}</code>
+║┣⪼ ᴅᴇʟᴇᴛᴇᴅ: <code>{}</code>
+║┣⪼ sᴋɪᴘᴘᴇᴅ: <code>{}</code>
+║┣⪼ ꜰɪʟᴛᴇʀᴇᴅ: <code>{}</code>
 ║┃
-║┣⪼<b>𖨠 ғᴏʀᴡᴀʀᴅᴇᴅ ᴍᴇssᴀɢᴇs: </b> <code>{}</code>
-║┃
-║┣⪼<b>𖨠 ᴅᴜᴘʟɪᴄᴀᴛᴇ ᴍᴇssᴀɢᴇs: </b> <code>{}</code>
-║┃
-║┣⪼<b>𖨠 ᴅᴇʟᴇᴛᴇᴅ ᴍᴇssᴀɢᴇs: </b> <code>{}</code>
-║┃
-║┣⪼<b>𖨠 sᴋɪᴘᴘᴇᴅ ᴍᴇssᴀɢᴇs: </b> <code>{}</code>
-║┃
-║┣⪼<b>𖨠 ғɪʟᴛᴇʀᴇᴅ ᴍᴇssᴀɢᴇs: </b> <code>{}</code>
-║┃
-║┣⪼<b>𖨠 ᴄᴜʀʀᴇɴᴛ sᴛᴀᴛᴜs: </b> <code>{}</code>
-║┃
-║┣⪼<b>𖨠 ᴘᴇʀᴄᴇɴᴛᴀɢᴇ: </b> <code>{}</code>%
+║┣⪼ sᴛᴀᴛᴜs: <code>{}</code>
+║┣⪼ ᴘʀᴏɢʀᴇss: <code>{}%</code>
 ║╰━━━━━━━━━━━━━━━➣ 
-╚════❰ <b>{}</b> ❱══❍⊱❁"""
+╚════❰ {} ❱══❍⊱❁</b>"""
 
-#Dont Remove My Credit @Silicon_Bot_Update 
-#This Repo Is By @Silicon_Official 
-# For Any Kind Of Error Ask Us In Support Group @Silicon_Botz 
   DUPLICATE_TEXT = """
 ╔════❰ ᴜɴᴇǫᴜɪғʏ sᴛᴀᴛᴜs ❱═❍⊱❁۪۪
 ║╭━━━━━━━━━━━━━━━➣
-║┣⪼ <b>ғᴇᴛᴄʜᴇᴅ ғɪʟᴇs:</b> <code>{}</code>
-║┃
-║┣⪼ <b>ᴅᴜᴘʟɪᴄᴀᴛᴇ ᴅᴇʟᴇᴛᴇᴅ:</b> <code>{}</code> 
+║┣⪼ ꜰᴇᴛᴄʜᴇᴅ: <code>{}</code>
+║┣⪼ ᴅᴇʟᴇᴛᴇᴅ: <code>{}</code> 
 ║╰━━━━━━━━━━━━━━━➣
 ╚════❰ {} ❱══❍⊱❁۪۪
 """
-#Dont Remove My Credit @Silicon_Bot_Update 
-#This Repo Is By @Silicon_Official 
-# For Any Kind Of Error Ask Us In Support Group @Silicon_Botz 
-  DOUBLE_CHECK = """<b><u>ᴅᴏᴜʙʟᴇ ᴄʜᴇᴄᴋɪɴɢ 📋</b></u>
+  
+  PROGRESS = """
+📊 <b><u>ᴘʀᴏɢʀᴇss ᴅᴇᴛᴀɪʟs</u></b>
 
-<b>ʙᴇꜰᴏʀᴇ ꜰᴏʀᴡᴀʀᴅɪɴɢ ᴛʜᴇ ᴍᴇssᴀɢᴇs ᴄʟɪᴄᴋ ᴛʜᴇ ʏᴇs ʙᴜᴛᴛᴏɴ ᴏɴʟʏ ᴀꜰᴛᴇʀ ᴄʜᴇᴄᴋɪɴɢ ᴛʜᴇ ꜰᴏʟʟᴏᴡɪɴɢ</b>
-
-
-<b>★ ʏᴏᴜʀ ʙᴏᴛ: {botname}</b>
-<b>★ sᴏᴜʀᴄᴇ ᴄʜᴀᴛ: {from_chat}</b>
-<b>★ ᴛᴀʀɢᴇᴛ ᴄʜᴀᴛ: {to_chat}</b>
-<b>★ sᴋɪᴘ ᴍᴇssᴀɢᴇs: {skip}</b>
-
-<i><b>° {botname} ᴍᴜsᴛ ʙᴇ ᴀᴅᴍɪɴ ɪɴ ᴛᴀʀɢᴇᴛ ᴄʜᴀᴛ</i> ({to_chat})</b>
-<i><b>° ɪꜰ ᴛʜᴇ sᴏᴜʀᴄᴇ ᴄʜᴀᴛ ɪs ᴘʀɪᴠᴀᴛᴇ ʏᴏᴜʀ ᴜsᴇʀʙᴏᴛ ᴍᴜsᴛ ʙᴇ ᴍᴇᴍʙᴇʀ ᴏʀ ʏᴏᴜʀ ʙᴏᴛ ᴍᴜsᴛ ʙᴇ ᴀᴅᴍɪɴ ɪɴ ᴛʜᴇʀᴇ ᴀʟsᴏ</b></i>
-
-<b>ɪꜰ ᴛʜᴇ ᴀʙᴏᴠᴇ ɪs ᴄʜᴇᴄᴋᴇᴅ ᴛʜᴇɴ ᴛʜᴇ ʏᴇs ʙᴜᴛᴛᴏɴ ᴄᴀɴ ʙᴇ ᴄʟɪᴄᴋᴇᴅ</b>"""
-
-
-#Dont Remove My Credit @Silicon_Bot_Update 
-#This Repo Is By @Silicon_Official 
-# For Any Kind Of Error Ask Us In Support Group @Silicon_Botz 
+📈 ᴘᴇʀᴄᴇɴᴛᴀɢᴇ : {0} %
+⭕ ғᴇᴛᴄʜᴇᴅ : {1}
+⚙️ ғᴏʀᴡᴀʀᴅᴇᴅ : {2}
+🗞️ ʀᴇᴍᴀɴɪɴɢ : {3}
+♻️ sᴛᴀᴛᴜs : {4}
+⏳️ ᴇᴛᴀ : {5}
+"""
