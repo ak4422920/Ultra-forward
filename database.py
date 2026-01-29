@@ -1,5 +1,3 @@
-# database.py 
-
 from os import environ 
 from config import Config
 import motor.motor_asyncio
@@ -19,7 +17,7 @@ class Database:
         self.col = self.db.users
         self.nfy = self.db.notify
         self.chl = self.db.channels 
-        self.tasks = self.db.tasks  # New: Task queue for point #4 & #6
+        self.tasks = self.db.tasks  # Task queue collection for Auto-Resume
         
     def new_user(self, id, name):
         return dict(
@@ -87,7 +85,7 @@ class Database:
         await self.col.update_one({'id': int(id)}, {'$set': {'configs': configs}})
          
     async def get_configs(self, id):
-        # Point #1, #2, #3: Added new keys to default config
+        # Added keys: thumbnail, replace_words, admin_backup
         default = {
             'caption': None,
             'duplicate': True,
@@ -99,9 +97,9 @@ class Database:
             'protect': None,
             'button': None,
             'db_uri': None,
-            'thumbnail': None,       # Custom Thumbnail ID
-            'replace_words': {},     # Keyword replacement dictionary
-            'admin_backup': None,    # Specific channel for admin file backup
+            'thumbnail': None,       # File ID for custom thumbnail
+            'replace_words': {},     # Word Mapping (old: new)
+            'admin_backup': None,    # Channel ID for backup
             'filters': {
                'poll': True,
                'text': True,
@@ -175,30 +173,25 @@ class Database:
     async def get_all_frwd(self):
        return self.nfy.find({})
 
-    # ================= TASK QUEUE FUNCTIONS (Auto-Resume Support) ================= #
+    # --- Task Persistence Functions ---
 
     async def add_task(self, user_id, task_data):
-        """Adds a new forwarding task to the database queue."""
         task_data.update({'user_id': int(user_id), 'status': 'running'})
-        return await self.tasks.insert_one(task_data)
+        await self.tasks.update_one({'user_id': int(user_id)}, {'$set': task_data}, upsert=True)
 
     async def get_task(self, user_id):
-        """Fetches the current active task for a user."""
         return await self.tasks.find_one({'user_id': int(user_id), 'status': 'running'})
 
     async def update_task_status(self, user_id, last_msg_id):
-        """Updates the progress of a task so it can resume after restart."""
-        return await self.tasks.update_one(
+        await self.tasks.update_one(
             {'user_id': int(user_id), 'status': 'running'},
             {'$set': {'last_processed_id': last_msg_id}}
         )
 
     async def get_active_tasks(self):
-        """Fetches all tasks that were running before a bot restart."""
         return self.tasks.find({'status': 'running'})
 
     async def remove_task(self, user_id):
-        """Deletes or marks a task as completed."""
-        return await self.tasks.delete_one({'user_id': int(user_id), 'status': 'running'})
+        await self.tasks.delete_one({'user_id': int(user_id)})
     
 db = Database(Config.DATABASE_URI, Config.DATABASE_NAME)
