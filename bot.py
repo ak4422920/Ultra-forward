@@ -10,9 +10,10 @@ from pyrogram.errors import FloodWait
 from aiohttp import web
 from plugins import web_server 
 
-# Automatic restart logic ko handle karne ke liye function import (Ye hum regix.py mein banayenge)
+# Regix plugin se auto-resume function import karna
 from plugins.regix import auto_restart_task
 
+# Logging Setup
 logging.config.fileConfig('logging.conf')
 logging.getLogger().setLevel(logging.INFO)
 logging.getLogger("pyrogram").setLevel(logging.ERROR)
@@ -20,7 +21,7 @@ logging.getLogger("pyrogram").setLevel(logging.ERROR)
 class Bot(Client): 
     def __init__(self):
         super().__init__(
-            Config.BOT_SESSION,
+            name=Config.BOT_SESSION,
             api_hash=Config.API_HASH,
             api_id=Config.API_ID,
             bot_token=Config.BOT_TOKEN,   
@@ -33,47 +34,58 @@ class Bot(Client):
     async def start(self):
         await super().start()
         me = await self.get_me()
-        logging.info(f"{me.first_name} (Layer {layer}) started on @{me.username}.")
-        
-        # Web server initialization
-        app = web.AppRunner(await web_server())
-        await app.setup()
-        bind_address = "0.0.0.0"
-        await web.TCPSite(app, bind_address, Config.PORT).start()
-        
         self.id = me.id
         self.username = me.username
         self.first_name = me.first_name
         self.set_parse_mode(ParseMode.DEFAULT)
         
-        logging.info("Checking for unfinished tasks to Auto-Resume...")
+        logging.info(f"🚀 {me.first_name} (Layer {layer}) started on @{me.username}")
+
+        # --- Web Server Setup ---
+        try:
+            app = web.AppRunner(await web_server())
+            await app.setup()
+            bind_address = "0.0.0.0"
+            await web.TCPSite(app, bind_address, Config.PORT).start()
+            logging.info(f"🌐 Web Server started on Port: {Config.PORT}")
+        except Exception as e:
+            logging.error(f"❌ Web Server Error: {e}")
 
         # ================= FULLY AUTOMATIC RESUME LOGIC ================= #
-        # Database se un tasks ko uthana jinka status 'running' hai
-        active_tasks = await db.get_active_tasks()
+        logging.info("🔍 Checking Database for unfinished tasks...")
         
-        async for task in active_tasks:
-            user_id = task['user_id']
-            logging.info(f"Automatically restarting task for User: {user_id}")
+        try:
+            active_tasks = await db.get_active_tasks()
+            task_count = 0
             
-            # Har task ko background mein alag se start karna taaki bot hang na ho
-            asyncio.create_task(auto_restart_task(self, user_id, task))
+            async for task in active_tasks:
+                user_id = task['user_id']
+                task_count += 1
+                
+                # Background mein task start karna (Asynchronous)
+                asyncio.create_task(auto_restart_task(self, user_id, task))
+                
+                # User ko notification bhejna (Silent Failure agar bot blocked hai)
+                try:
+                    await self.send_message(
+                        chat_id=user_id, 
+                        text="<b>♻️ ʙᴏᴛ ʀᴇsᴛᴀʀᴛᴇᴅ: Aapka forwarding task automatically resume ho gaya hai!</b>"
+                    )
+                except:
+                    pass
             
-            # User ko update dena (Optional)
-            try:
-                await self.send_message(
-                    chat_id=user_id, 
-                    text="<b>♻️ ʙᴏᴛ ʀᴇsᴛᴀʀᴛᴇᴅ: Aapka forwarding task automatically resume ho gaya hai!</b>"
-                )
-            except:
-                pass
+            if task_count > 0:
+                logging.info(f"✅ Successfully resumed {task_count} active tasks.")
+            else:
+                logging.info("ℹ️ No active tasks found to resume.")
 
-        logging.info("All pending tasks have been resumed automatically.")
+        except Exception as e:
+            logging.error(f"❌ Auto-Resume Logic Error: {e}")
 
     async def stop(self, *args):
-        msg = f"@{self.username} stopped. Bye."
         await super().stop()
-        logging.info(msg)
+        logging.info(f"@{self.username} stopped. Bye! 👋")
 
-app = Bot()
-app.run()
+if __name__ == "__main__":
+    app = Bot()
+    app.run()
