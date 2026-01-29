@@ -85,37 +85,37 @@ class Database:
         await self.col.update_one({'id': int(id)}, {'$set': {'configs': configs}})
          
     async def get_configs(self, id):
-        # Added keys: thumbnail, replace_words, admin_backup
-        default = {
-            'caption': None,
-            'duplicate': True,
-            'forward_tag': False,
-            'file_size': 0,
-            'size_limit': None,
-            'extension': None,
-            'keywords': None,
-            'protect': None,
-            'button': None,
-            'db_uri': None,
-            'thumbnail': None,       # File ID for custom thumbnail
-            'replace_words': {},     # Word Mapping (old: new)
-            'admin_backup': None,    # Channel ID for backup
-            'filters': {
-               'poll': True,
-               'text': True,
-               'audio': True,
-               'voice': True,
-               'video': True,
-               'photo': True,
-               'document': True,
-               'animation': True,
-               'sticker': True
-            }
+    # Aapka default dictionary (Wahi rahega jo upar hai)
+    default = {
+        'caption': None,
+        'duplicate': True,
+        'forward_tag': False,
+        'file_size': 0,
+        'size_limit': None,
+        'extension': None,
+        'keywords': None,
+        'protect': None,
+        'button': None,
+        'db_uri': None,
+        'thumbnail': None,
+        'replace_words': {},
+        'admin_backup': None,
+        'filters': {
+           'poll': True, 'text': True, 'audio': True, 'voice': True,
+           'video': True, 'photo': True, 'document': True,
+           'animation': True, 'sticker': True
         }
-        user = await self.col.find_one({'id':int(id)})
-        if user:
-            return user.get('configs', default)
-        return default 
+    }
+
+    user = await self.col.find_one({'id': int(id)})
+    
+    # AGAR USER MILTA HAI TO MERGE KARO
+    if user and 'configs' in user:
+        config_data = default.copy() # Pehle default values lo
+        config_data.update(user['configs']) # Purane user ka data uspar overwrite karo
+        return config_data
+        
+    return default # Bilkul naye user ke liye sirf default 
        
     async def add_bot(self, datas):
        if not await self.is_bot_exist(datas['user_id']):
