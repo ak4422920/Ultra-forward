@@ -1,3 +1,4 @@
+import time
 from os import environ 
 from config import Config
 import motor.motor_asyncio
@@ -17,7 +18,7 @@ class Database:
         self.col = self.db.users
         self.nfy = self.db.notify
         self.chl = self.db.channels 
-        self.tasks = self.db.tasks  # Task queue collection for Auto-Resume
+        self.tasks = self.db.tasks  # Task queue for Auto-Resume
         
     def new_user(self, id, name):
         return dict(
@@ -47,27 +48,17 @@ class Database:
         return count
     
     async def remove_ban(self, id):
-        ban_status = dict(
-            is_banned=False,
-            ban_reason=''
-        )
+        ban_status = dict(is_banned=False, ban_reason='')
         await self.col.update_one({'id': id}, {'$set': {'ban_status': ban_status}})
     
     async def ban_user(self, user_id, ban_reason="No Reason"):
-        ban_status = dict(
-            is_banned=True,
-            ban_reason=ban_reason
-        )
+        ban_status = dict(is_banned=True, ban_reason=ban_reason)
         await self.col.update_one({'id': user_id}, {'$set': {'ban_status': ban_status}})
 
     async def get_ban_status(self, id):
-        default = dict(
-            is_banned=False,
-            ban_reason=''
-        )
+        default = dict(is_banned=False, ban_reason='')
         user = await self.col.find_one({'id':int(id)})
-        if not user:
-            return default
+        if not user: return default
         return user.get('ban_status', default)
 
     async def get_all_users(self):
@@ -85,39 +76,24 @@ class Database:
         await self.col.update_one({'id': int(id)}, {'$set': {'configs': configs}})
          
     async def get_configs(self, id):
-        """
-        Merge Logic: Purane users ka data naye defaults ke saath merge hota hai 
-        taaki bot kabhi crash na ho.
-        """
+        """Merge Logic: Purane users ka data naye defaults ke saath merge."""
         default = {
-            'caption': None,
-            'duplicate': True,
-            'forward_tag': False,
-            'file_size': 0,
-            'size_limit': None,
-            'extension': None,
-            'keywords': None,
-            'protect': None,
-            'button': None,
-            'db_uri': None,
-            'thumbnail': None,       # Custom Thumbnail ID
-            'replace_words': {},     # Keyword Mapping (old: new)
-            'admin_backup': None,    # Backup Channel ID
+            'caption': None, 'duplicate': True, 'forward_tag': False,
+            'file_size': 0, 'size_limit': None, 'extension': None,
+            'keywords': None, 'protect': None, 'button': None,
+            'db_uri': Config.DATABASE_URI, 'thumbnail': None,
+            'replace_words': {}, 'admin_backup': None,
             'filters': {
                'poll': True, 'text': True, 'audio': True, 'voice': True,
                'video': True, 'photo': True, 'document': True,
                'animation': True, 'sticker': True
             }
         }
-
         user = await self.col.find_one({'id': int(id)})
-        
-        # Agar user ka data milta hai, toh use default ke upar overwrite karo
         if user and 'configs' in user:
             config_data = default.copy()
             config_data.update(user['configs'])
             return config_data
-            
         return default 
        
     async def add_bot(self, datas):
@@ -141,14 +117,12 @@ class Database:
     
     async def add_channel(self, user_id: int, chat_id: int, title, username):
        channel = await self.in_channel(user_id, chat_id)
-       if channel:
-         return False
+       if channel: return False
        return await self.chl.insert_one({"user_id": user_id, "chat_id": chat_id, "title": title, "username": username})
     
     async def remove_channel(self, user_id: int, chat_id: int):
        channel = await self.in_channel(user_id, chat_id )
-       if not channel:
-         return False
+       if not channel: return False
        return await self.chl.delete_many({"user_id": int(user_id), "chat_id": int(chat_id)})
     
     async def get_channel_details(self, user_id: int, chat_id: int):
@@ -163,8 +137,7 @@ class Database:
        configs = await self.get_configs(user_id)
        filter_data = configs.get('filters', {})
        for k, v in filter_data.items():
-          if v == False:
-            filters.append(str(k))
+          if v == False: filters.append(str(k))
        return filters
               
     async def add_frwd(self, user_id):
@@ -177,8 +150,7 @@ class Database:
     async def get_all_frwd(self):
        return self.nfy.find({})
 
-    # --- Task Persistence Functions (For Auto-Resume) ---
-
+    # --- Task Persistence (For Auto-Resume) ---
     async def add_task(self, user_id, task_data):
         task_data.update({'user_id': int(user_id), 'status': 'running'})
         await self.tasks.update_one({'user_id': int(user_id)}, {'$set': task_data}, upsert=True)
@@ -197,5 +169,22 @@ class Database:
 
     async def remove_task(self, user_id):
         await self.tasks.delete_one({'user_id': int(user_id)})
+
+    # ================= DUPLICATE FINGERPRINT LOGIC ================= #
+    #
+    async def is_duplicate(self, db_uri, chat_id, file_unique_id):
+        """Check if file fingerprint exists for this specific channel."""
+        collection = self.db[f"duplicates_{chat_id}"]
+        result = await collection.find_one({'file_unique_id': file_unique_id})
+        return bool(result)
+
+    async def save_fingerprint(self, db_uri, chat_id, file_unique_id):
+        """Save file fingerprint to isolation collection."""
+        collection = self.db[f"duplicates_{chat_id}"]
+        await collection.update_one(
+            {'file_unique_id': file_unique_id},
+            {'$set': {'file_unique_id': file_unique_id, 'timestamp': time.time()}},
+            upsert=True
+        )
     
 db = Database(Config.DATABASE_URI, Config.DATABASE_NAME)
