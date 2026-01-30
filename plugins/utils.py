@@ -14,23 +14,22 @@ class STS:
         """Task ID valid hai ya nahi check karne ke liye."""
         return self.id in self.data
     
-    def store(self, From, to, skip, total, limit=0):
+    def store(self, From, to, skip, total):
         """
         Setup ke details save karta hai. 
-        Note: total yahan 'last_msg_id' hai jo regix use karta hai.
+        LIMIT REMOVED: Ab bot sirf From, To, Skip aur Total save karega.
         """
         self.data[self.id] = {
             "FROM": From, 
             'TO': to, 
             'total_files': 0, 
             'skip': skip, 
-            'limit': limit,
-            'fetched': 0, # Kitne messages check kiye
+            'fetched': 0, 
             'filtered': 0, 
             'deleted': 0, 
             'duplicate': 0, 
-            'last_id': total, # Source channel ka aakhri message ID
-            'total': total,   # UI mein dikhane ke liye total messages
+            'last_id': total, 
+            'total': total,   
             'start': tm.time()
         }
         return self
@@ -41,11 +40,10 @@ class STS:
         if not values:
             return None
         if not full:
-           # Mapping for backward compatibility with regix.py
-           mapping = {'FROM': 'FROM', 'TO': 'TO', 'skip': 'skip', 'limit': 'limit', 'total': 'total'}
+           # Mapping cleaned: 'limit' keyword poori tarah hata diya gaya hai
+           mapping = {'FROM': 'FROM', 'TO': 'TO', 'skip': 'skip', 'total': 'total'}
            return values.get(mapping.get(value, value))
            
-        # Object format mein return karna for i.total, i.fetched etc.
         class DataObject:
             def __init__(self, d, id):
                 for k, v in d.items():
@@ -63,33 +61,23 @@ class STS:
         if key in self.data[self.id]:
             self.data[self.id][key] += value
     
-    def divide(self, no, by):
-       """ETA calculation helper."""
-       by = 1 if int(by) == 0 else by 
-       return float(no) / by 
-    
     async def get_data(self, user_id):
         """Database se settings fetch karna."""
         bot = await db.get_bot(user_id)
         configs = await db.get_configs(user_id)
         filters = await db.get_filters(user_id)
         
-        # Duplicate detection setup
         duplicate = [configs['db_uri'], self.get('TO')] if configs.get('duplicate') else False
-        
-        # Inline buttons parse karna
         button = parse_buttons(configs.get('button', ''))
-        
-        # File size limit check
         size = [configs.get('file_size', 0), configs.get('size_limit')] if configs.get('file_size') != 0 else None
         
+        # Dictionary se 'limit' key hata di gayi hai taaki engine auto-calculation use kare
         return (
             bot, 
             configs.get('caption'), 
             configs.get('forward_tag'), 
             {
                 'chat_id': self.get('FROM'), 
-                'limit': self.get('limit'), 
                 'offset': self.get('skip'), 
                 'filters': filters,
                 'keywords': configs.get('keywords'), 
