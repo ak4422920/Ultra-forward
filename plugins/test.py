@@ -5,7 +5,7 @@ import asyncio
 import logging 
 from database import db 
 from config import Config, temp
-from pyrogram import Client, filters
+from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message 
 from pyrogram.errors import (
     FloodWait, 
@@ -18,33 +18,34 @@ from translation import Translation
 
 logger = logging.getLogger(__name__)
 
-# --- Regex for Button Parsing ---
+# --- Regex for Professional Button Parsing ---
+# Format: [Google][buttonurl:https://google.com]
 BTN_URL_REGEX = re.compile(r"(\[([^\[]+?)]\[buttonurl:/{0,2}(.+?)(:same)?])")
 
 # ================= CONFIGURATION MANAGER ================= #
 
 async def get_configs(user_id):
-    """Database se user ki saari settings uthata hai."""
+    """Database se user ki saari settings fetch karta hai."""
     return await db.get_configs(user_id)
 
 async def update_configs(user_id, key, value):
     """
-    User settings update karne ka dimag.
-    Saare naye features (Thumbnail, Mapper, Targets) yahan register hain.
+    Elite V3 Features (Thumbnail, Mapper, Targets) ko register karne ka main function.
     """
     current = await db.get_configs(user_id)
     
-    # Elite V3 Features Keys
+    # Root level settings for fast access
     root_keys = [
         'caption', 'duplicate', 'db_uri', 'forward_tag', 
         'protect', 'file_size', 'button', 'replace_words', 
-        'admin_backup', 'thumbnail', 'targets' #
+        'admin_backup', 'thumbnail', 'targets' 
     ]
     
     if key in root_keys:
         current[key] = value
     else: 
-        if 'filters' not in current: current['filters'] = {}
+        if 'filters' not in current: 
+            current['filters'] = {}
         current['filters'][key] = value
         
     await db.update_configs(user_id, current)
@@ -53,23 +54,19 @@ async def update_configs(user_id, key, value):
 
 async def start_clone_bot(FwdBot):
    """
-   Client ko start karta hai aur usme custom iterator inject karta hai.
-   Isse bot deleted messages ko skip karke smoothly aage badhta hai.
+   Client ko start karke usme iterator inject karta hai smoothly history scan ke liye.
    """
    if not FwdBot.is_connected:
        await FwdBot.start()
    
    async def iter_messages(chat_id, limit, offset_id=0):
-        """
-        Engine history scan karne ke liye get_chat_history use karega.
-        """
         async for message in FwdBot.get_chat_history(chat_id, limit=limit, offset_id=offset_id):
             yield message
                 
    FwdBot.iter_messages = iter_messages
    return FwdBot
 
-# ================= CLIENT MANAGEMENT (BOT/USERBOT) ================= #
+# ================= CLIENT MANAGEMENT (ELITE V3) ================= #
 
 class CLIENT: 
   def __init__(self):
@@ -78,37 +75,38 @@ class CLIENT:
     
   def client(self, data, user=None):
      """
-     In-Memory clients banata hai taaki server storage na bhare.
+     Ye function In-Memory clients banata hai.
+     Fayda: Session files storage nahi bharti.
      """
      if user is None and isinstance(data, dict) and data.get('is_bot') == False:
-        # Userbot Client
+        # Userbot (Session String)
         return Client(
             name=f"user_{data['user_id']}", 
             api_id=self.api_id, 
             api_hash=self.api_hash, 
             session_string=data.get('session'), 
-            in_memory=True
+            in_memory=True 
         )
      elif user is True:
-        # String Session add karte waqt validation
+        # String Session validation during login
         return Client(name="val_session", api_id=self.api_id, api_hash=self.api_hash, session_string=data, in_memory=True)
      
-     # Bot Token Client
+     # Normal Bot Worker (Token)
      token = data if isinstance(data, str) else data.get('token')
      return Client(name="bot_worker", api_id=self.api_id, api_hash=self.api_hash, bot_token=token, in_memory=True)
   
   async def add_bot(self, bot, message):
-     """Bot Token se worker add karna."""
+     """Bot Token ke zariye worker add karna."""
      user_id = int(message.from_user.id)
-     prompt = "<b>1) @BotFather se ek bot banayein.\n2) Uska API Token copy karein.\n3) Wo token mujhe yahan bhej dein.\n\n/cancel - To Stop.</b>"
+     prompt = "<b>1) @BotFather se naya bot banayein.\n2) Uska API Token copy karein.\n3) Token yahan bhej dein.\n\n/cancel - To Stop.</b>"
      msg = await bot.ask(chat_id=user_id, text=prompt)
-     if msg.text == '/cancel': return await msg.reply('❌ Action Cancelled!')
+     if msg.text == '/cancel': return await msg.reply('❌ Process Cancelled!')
      
      token_match = re.findall(r'\d[0-9]{8,10}:[0-9A-Za-z_-]{35}', msg.text)
      bot_token = token_match[0] if token_match else None
-     if not bot_token: return await msg.reply_text("<b>❌ Invalid Token Format!</b>")
+     if not bot_token: return await msg.reply_text("<b>❌ Error:</b> Sahi token format bhejein.")
        
-     sts = await msg.reply_text("<code>Verifying Bot Token...</code>")
+     sts = await msg.reply_text("<code>Authenticating Bot...</code>")
      try:
        _client = await start_clone_bot(self.client(bot_token, False))
        _bot = _client.me
@@ -117,18 +115,18 @@ class CLIENT:
            'name': _bot.first_name, 'token': bot_token, 'username': _bot.username
        }
        await db.add_bot(details)
-       await sts.edit(f"<b>✅ Bot Added Successfully!</b>\n\n<b>Name:</b> {_bot.first_name}\n<b>Username:</b> @{_bot.username}")
+       await sts.edit(f"<b>✅ Bot Worker Added!</b>\n\n<b>Name:</b> {_bot.first_name}")
        await _client.stop()
        return True
      except Exception as e:
-       await sts.edit(f"<b>❌ Error:</b> `{e}`")
+       await sts.edit(f"<b>❌ Failure:</b> `{e}`")
        return False
 
   async def add_login(self, bot, message):
-    """Phone number aur OTP flow (Safe & Secure)."""
+    """Phone login system (OTP + 2FA support)."""
     user_id = int(message.from_user.id)
-    await bot.send_message(user_id, "<b>📲 Please send your Phone Number with Country Code.\nExample: <code>+919876543210</code>\n/cancel - To cancel.</b>")
-    phone_msg = await bot.ask(user_id, "Aapka number?", filters=filters.text)
+    await bot.send_message(user_id, "<b>📲 Number bhejein (+ Country Code).\nExample: <code>+919876543210</code>\n/cancel - Stop.</b>")
+    phone_msg = await bot.ask(user_id, "Mobile Number?", filters=filters.text)
     if phone_msg.text.startswith('/'): return
         
     client = Client(name="user", api_id=self.api_id, api_hash=self.api_hash, in_memory=True)
@@ -136,14 +134,14 @@ class CLIENT:
     
     try:
         code = await client.send_code(phone_msg.text)
-        prompt_otp = "<b>📩 OTP bhej diya gaya hai.</b>\n\nOTP ke beech mein space dein (Example: <code>1 2 3 4 5</code>)."
-        otp_msg = await bot.ask(user_id, prompt_otp, filters=filters.text, timeout=600)
+        otp_prompt = "<b>📩 OTP check karein (Official Telegram app mein).</b>\n\nOTP ke beech mein space dein (Ex: <code>1 2 3 4 5</code>)."
+        otp_msg = await bot.ask(user_id, otp_prompt, filters=filters.text, timeout=300)
         await client.sign_in(phone_msg.text, code.phone_code_hash, otp_msg.text.replace(" ", ""))
     except SessionPasswordNeeded:
-        pwd = await bot.ask(user_id, "<b>🔐 2FA Password:</b>\n\nAapka account Protected hai, password bhejye.", filters=filters.text)
+        pwd = await bot.ask(user_id, "<b>🔐 2FA Security:</b>\n\nAapka password mang raha hai, bhejye.", filters=filters.text)
         await client.check_password(password=pwd.text)
     except Exception as e:
-        return await bot.send_message(user_id, f"<b>❌ Login Error:</b> `{e}`")
+        return await bot.send_message(user_id, f"<b>❌ Login Failed:</b> `{e}`")
 
     string_session = await client.export_session_string()
     user = await client.get_me()
@@ -151,14 +149,14 @@ class CLIENT:
         'id': user.id, 'is_bot': False, 'user_id': user_id, 
         'name': user.first_name, 'session': string_session, 'username': user.username
     })
-    await bot.send_message(user_id, f"<b>✅ Userbot Logged In!</b>\n\n<b>Name:</b> {user.first_name}")
+    await bot.send_message(user_id, f"<b>✅ Userbot Elite Connected!</b>\n\n<b>Name:</b> {user.first_name}")
     await client.disconnect()
     return True
 
 # ================= BUTTON PARSER ================= #
 
 def parse_buttons(text, markup=True):
-    """[Name][buttonurl:link] format ko Telegram buttons mein badalta hai."""
+    """[Name][buttonurl:link] ko standard Telegram buttons mein convert karta hai."""
     buttons = []
     if not text: return None
     for match in BTN_URL_REGEX.finditer(text):
