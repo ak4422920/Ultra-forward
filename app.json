@@ -1,16 +1,17 @@
 {
-  "name": "Ultra-Forward-Bot-V3",
-  "description": "Advanced Telegram Forwarding Bot with Auto-Resume and Keyword Mapping.",
+  "name": "Forward-Elite-V3",
+  "description": "Professional Telegram Forwarding Bot with 1->5 Multi-Target, Auto-Resume, and Keyword Mapping.",
   "stack": "container",
   "keywords": [
     "telegram",
     "forward",
     "bot",
     "auto-resume",
+    "multi-target",
     "elite"
   ],
   "website": "https://github.com/ak4422920/Ultra-forward",
-"repository": "https://github.com/ak4422920/Ultra-forward",
+  "repository": "https://github.com/ak4422920/Ultra-forward",
   "env": {
     "API_ID": {
       "description": "Get this from https://my.telegram.org",
@@ -25,24 +26,40 @@
       "value": ""
     },
     "BOT_OWNER_ID": {
-      "description": "Your Telegram Numeric ID.",
-      "value": ""
+      "description": "Your Telegram Numeric ID (Admin).",
+      "value": "5482682830"
     },
     "DATABASE_URI": {
       "description": "Your MongoDB Connection String.",
       "value": ""
     },
+    "DATABASE_NAME": {
+      "description": "MongoDB Database Name (Default: Cluster0).",
+      "value": "Cluster0"
+    },
     "LOG_CHANNEL": {
       "description": "Log Channel ID (with -100) to receive bot logs.",
       "value": ""
     },
-    "FORCE_SUB_CHANNEL": {
-      "description": "Channel Link for Force Subscription (e.g. https://t.me/yourchannel).",
+    "AUTO_BACKUP_CHANNEL": {
+      "description": "Channel ID where all forwarded files will be backed up (Hidden).",
+      "value": ""
+    },
+    "THUMB_LIMIT": {
+      "description": "Max files limit when thumbnail is used (Set higher for VPS).",
+      "value": "10"
+    },
+    "FORCE_SUB_CHANNELS": {
+      "description": "Multiple Channel IDs for Force Sub (Space separated, e.g. -100123 -100456).",
       "value": ""
     },
     "FORCE_SUB_ON": {
       "description": "Set to 'True' to enable force sub, otherwise 'False'.",
-      "value": "False"
+      "value": "True"
+    },
+    "PORT": {
+      "description": "Port for Web Server (Default: 8080).",
+      "value": "8080"
     }
   },
   "formation": {
