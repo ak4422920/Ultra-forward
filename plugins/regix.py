@@ -32,6 +32,21 @@ def get_size(size):
         i += 1; size /= 1024.0
     return "%.2f %s" % (size, units[i])
 
+def custom_caption(msg, caption):
+    if msg.media:
+        media_obj = getattr(msg, msg.media.value, None)
+        if media_obj:
+            fcaption = getattr(msg, 'caption', '')
+            fcaption = fcaption.html if fcaption else ''
+            if caption: 
+                return caption.format(
+                    filename=getattr(media_obj, 'file_name', 'No Name'), 
+                    size=get_size(getattr(media_obj, 'file_size', 0)), 
+                    caption=fcaption
+                )
+            return fcaption
+    return None
+
 async def auto_restart_task(bot, user_id, task_data):
     frwd_id = task_data.get('frwd_id') 
     if frwd_id:
@@ -44,7 +59,7 @@ async def stop_handler(bot, message):
     user_id = message.from_user.id
     temp.CANCEL[user_id] = True
     temp.lock[user_id] = False
-    await message.reply("<b>🛑 Task Stopping...</b> Bot agla message forward nahi karega aur lock khul jayega.")
+    await message.reply("<b>🛑 Task Stopped:</b> Lock reset ho gaya hai.")
 
 # ================= COMMAND HANDLER ================= #
 @Client.on_message(filters.command('forward') & filters.private)
@@ -53,7 +68,7 @@ async def forward_handler(bot, message):
     if temp.lock.get(user_id):
         return await message.reply("<b>❌ Error:</b> Pehle se ek task chal raha hai.")
 
-    # 1. Source
+    # Source parsing
     source = await bot.ask(user_id, Translation.FROM_MSG)
     if source.text == "/cancel": return await message.reply(Translation.CANCEL)
     
@@ -65,12 +80,12 @@ async def forward_handler(bot, message):
             try: chat_id = source.text.split("/")[-2]
             except: return await message.reply("<b>❌ Error:</b> Invalid Link!")
 
-    # 2. Targets (1 to 5)
+    # Multi-Target parsing
     target = await bot.ask(user_id, Translation.TO_MSG)
     if target.text == "/cancel": return await message.reply(Translation.CANCEL)
     target_ids = target.text.replace(" ", "")
 
-    # 3. Skip
+    # Skip parsing
     skip = await bot.ask(user_id, Translation.SKIP_MSG)
     if skip.text == "/cancel": return await message.reply(Translation.CANCEL)
     skip_val = int(skip.text) if skip.text.isdigit() else 0
@@ -79,9 +94,11 @@ async def forward_handler(bot, message):
     sts = STS(frwd_id).store(chat_id, target_ids, skip_val, 0)
     
     btn = InlineKeyboardMarkup([[InlineKeyboardButton("🚀 START FORWARD", callback_data=f"start_public_{frwd_id}")]])
-    await message.reply("<b>✅ Setup Complete!</b>", reply_markup=btn)
+    await message.reply("<b>✅ Setup Complete!</b> Click niche karein start karne ke liye.", reply_markup=btn)
 
-# ================= MAIN ENGINE ================= #
+# ================= MAIN FORWARDING ENGINE ================= #
+
+
 @Client.on_callback_query(filters.regex(r'^start_public_'))
 async def pub_(bot, query):
     user = query.from_user.id
@@ -97,18 +114,20 @@ async def core_forward_engine(bot, user, sts, frwd_id, query=None, is_auto=False
     _bot, caption, forward_tag, data, protect, button = await sts.get_data(user)
     configs = await db.get_configs(user)
     word_map = configs.get('replace_words', {})
-    thumb_path = configs.get('thumbnail') # Ye path hoga agar thumbnail set hai
+    thumb_path = configs.get('thumbnail')
     admin_backup = Config.AUTO_BACKUP_CHANNEL
     target_list = str(sts.get('TO')).split(",")
 
     try:
         client = await start_clone_bot(CLIENT_OBJ.client(_bot))
         temp.lock[user] = True
+        
+        # Smart total message fetching
         total_msgs = await client.get_chat_history_count(sts.get('FROM'))
         sts.store(sts.get('FROM'), sts.get('TO'), sts.get('skip'), total_msgs)
         
         f_limit = total_msgs - int(sts.get('skip'))
-        if thumb_path: f_limit = min(f_limit, Config.THUMB_LIMIT) # Smart Limit
+        if thumb_path: f_limit = min(f_limit, Config.THUMB_LIMIT) # VPS Safety Lock
 
         await db.add_task(user, {'frwd_id': frwd_id, 'status': 'running'})
         m = query.message if not is_auto else await bot.send_message(user, "<b>♻️ Resuming...</b>")
@@ -131,43 +150,49 @@ async def core_forward_engine(bot, user, sts, frwd_id, query=None, is_auto=False
 
             new_cap = apply_word_replacement(custom_caption(msg, caption), word_map)
 
-            # --- FORWARDING / UPLOADING LOGIC ---
+            # --- TARGET LOOP (1 TO 5) ---
+            
             for target in target_list:
                 try:
                     t_id = int(target)
-                    # Agar Thumbnail hai toh Download & Send karna padega 
-                    
+                    # PATH A: Thumbnail Re-upload (Slow but Custom)
                     if thumb_path and msg.media:
                         path = await client.download_media(msg)
                         sent = await client.send_document(t_id, document=path, thumb=thumb_path, caption=new_cap, protect_content=protect)
                         if os.path.exists(path): os.remove(path)
+                    # PATH B: Fast Copy/Forward (Instant)
                     else:
-                        # Fast Forwarding
                         if forward_tag: sent = await client.forward_messages(t_id, sts.get('FROM'), [msg.id])
-                        else: sent = await client.copy_message(t_id, sts.get('FROM'), msg.id, caption=new_cap, protect_content=protect)
+                        else: sent = await client.copy_message(t_id, sts.get('FROM'), msg.id, caption=new_cap, protect_content=protect, reply_markup=button)
                     
-                    if admin_backup: await (sent[0] if isinstance(sent, list) else sent).copy(admin_backup)
-                except Exception as e: logger.error(e)
+                    if admin_backup: 
+                        backup_msg = sent[0] if isinstance(sent, list) else sent
+                        await backup_msg.copy(admin_backup)
+                except Exception as e: logger.error(f"Target Error: {e}")
             
             sts.add('total_files')
             if msg.media and configs.get('duplicate'): await db.save_fingerprint(user, file_id)
-            await asyncio.sleep(2)
+            await asyncio.sleep(1.5) # Fast but safe
 
-    except Exception as e: logger.error(e)
+    except Exception as e: logger.error(f"Global Engine Error: {e}")
     finally:
         temp.lock[user] = False 
         await db.remove_task(user)
         await edit(m, 'ᴄᴏᴍᴘʟᴇᴛᴇᴅ', "ᴄᴏᴍᴘʟᴇᴛᴇᴅ", sts)
-        await client.stop()
+        if client.is_connected: await client.stop()
 
 async def edit(msg, title, status, sts):
-    # Same as before, branding clean
+    if not msg: return
     i = sts.get(full=True)
     actual = int(i.total) - int(i.skip)
     percentage = "{:.1f}".format(float(i.fetched) * 100 / (actual if actual > 0 else 1))
     filled = math.floor(float(percentage) / 10)
     bar = "█" * filled + "░" * (10 - filled)
+    
     button = [[InlineKeyboardButton(f"[{bar}] {percentage}%", callback_data="none")]]
     if status == "ᴄᴏᴍᴘʟᴇᴛᴇᴅ": button.append([InlineKeyboardButton('💠 ᴜᴘᴅᴀᴛᴇ', url=Config.FORCE_SUB_CHANNEL)])
     else: button.append([InlineKeyboardButton('• ᴄᴀɴᴄᴇʟ', callback_data='terminate_frwd')])
-    await msg.edit(TEXT.format(i.total, i.fetched, i.total_files, i.duplicate, "0", i.skip, "0", status, percentage, title), reply_markup=InlineKeyboardMarkup(button))
+    
+    try:
+        await msg.edit(TEXT.format(i.total, i.fetched, i.total_files, i.duplicate, "0", i.skip, "0", status, percentage, title), reply_markup=InlineKeyboardMarkup(button))
+    except MessageNotModified: pass
