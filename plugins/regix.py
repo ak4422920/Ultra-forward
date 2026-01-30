@@ -17,6 +17,20 @@ CLIENT_OBJ = CLIENT()
 logger = logging.getLogger(__name__)
 TEXT = Translation.TEXT
 
+# ================= [NEW] AUTO-RESTART LOGIC ================= #
+
+async def auto_restart_task(bot, user_id, task_data):
+    """
+    Bot restart hone par background mein task resume karne ke liye.
+    Ye function Bot.py ko chahiye hota hai.
+    """
+    frwd_id = task_data.get('frwd_id') 
+    if frwd_id:
+        sts = STS(frwd_id)
+        # Memory refresh with DB values
+        sts.store(task_data.get('FROM'), task_data.get('TO'), task_data.get('skip'), 0)
+        await core_forward_engine(bot, user_id, sts, frwd_id, is_auto=True)
+
 # ================= HELPERS ================= #
 
 def apply_word_replacement(text, word_map):
@@ -48,35 +62,24 @@ def custom_caption(msg, caption):
             return fcaption
     return None
 
-# ================= STOP HANDLER ================= #
-
-@Client.on_message(filters.command('stop') & filters.private)
-async def stop_handler(bot, message):
-    user_id = message.from_user.id
-    temp.CANCEL[user_id] = True
-    temp.lock[user_id] = False
-    await message.reply("<b>🛑 Task Stopped:</b> Lock reset ho gaya hai.")
-
 # ================= MAIN FORWARDING ENGINE ================= #
 
 @Client.on_callback_query(filters.regex(r'^start_public_'))
 async def pub_(bot, query):
     user = query.from_user.id
-    # CRASH FIX: Bulletproof ID extraction
     frwd_id = query.data.replace("start_public_", "")
-    
     sts = STS(frwd_id)
     if not sts.verify():
         return await query.answer("❌ Error: Task data expired. Phir se setup karein.", show_alert=True)
-        
     await core_forward_engine(bot, user, sts, frwd_id, query)
 
 async def core_forward_engine(bot, user, sts, frwd_id, query=None, is_auto=False):
     temp.CANCEL[user] = False
+    m = None # [FIX] Variable initialize pehle hi kar diya taaki UnboundLocalError na aaye
+    
     if not is_auto and temp.lock.get(user): return
     if not sts.verify(): return
     
-    # Engine Data Fetching
     _bot, caption, forward_tag, data, protect, button = await sts.get_data(user)
     configs = await db.get_configs(user)
     word_map = configs.get('replace_words', {})
@@ -84,26 +87,29 @@ async def core_forward_engine(bot, user, sts, frwd_id, query=None, is_auto=False
     admin_backup = Config.AUTO_BACKUP_CHANNEL
     target_list = str(sts.get('TO')).split(",")
 
+    client = None
     try:
+        # Progress message set karna
+        if not is_auto:
+            m = query.message 
+        else:
+            m = await bot.send_message(user, "<b>♻️ Resuming Interrupted Task...</b>")
+
         client = await start_clone_bot(CLIENT_OBJ.client(_bot))
         temp.lock[user] = True
         
-        # Smart total message fetching
         total_msgs = await client.get_chat_history_count(sts.get('FROM'))
         sts.store(sts.get('FROM'), sts.get('TO'), sts.get('skip'), total_msgs)
         
-        # VPS Safety Lock
         f_limit = total_msgs - int(sts.get('skip'))
         if thumb_path: f_limit = min(f_limit, Config.THUMB_LIMIT) 
 
-        await db.add_task(user, {'frwd_id': frwd_id, 'status': 'running'})
-        m = query.message if not is_auto else await bot.send_message(user, "<b>♻️ Resuming...</b>")
+        await db.add_task(user, {'frwd_id': frwd_id, 'status': 'running', 'FROM': sts.get('FROM'), 'TO': sts.get('TO'), 'skip': sts.get('skip')})
         
         pling = 0
         async for msg in client.get_chat_history(sts.get('FROM'), offset_id=int(sts.get('skip'))):
             if temp.CANCEL.get(user) or pling >= f_limit: break
             
-            # Progress update every 5 messages
             if pling % 5 == 0: 
                 await edit(m, 'ғᴏʀᴡᴀʀᴅɪɴɢ', 10, sts)
                 await db.update_task_status(user, msg.id)
@@ -111,68 +117,45 @@ async def core_forward_engine(bot, user, sts, frwd_id, query=None, is_auto=False
             pling += 1; sts.add('fetched')
             if msg.empty or msg.service: continue
 
-            # Duplicate Check
             if msg.media and configs.get('duplicate'):
                 file_id = getattr(getattr(msg, msg.media.value), 'file_unique_id', None)
                 if await db.is_duplicate(user, file_id):
                     sts.add('duplicate'); continue
 
-            # Apply Word Mapping to Caption
             new_cap = apply_word_replacement(custom_caption(msg, caption), word_map)
 
-            # --- TARGET LOOP (Multi-Target Processing) ---
             for target in target_list:
                 try:
                     t_id = int(target.strip())
-                    
-                    # PATH A: Thumbnail Re-upload (Slow but Custom)
                     if thumb_path and msg.media:
                         path = await client.download_media(msg)
-                        sent = await client.send_document(
-                            t_id, 
-                            document=path, 
-                            thumb=thumb_path, 
-                            caption=new_cap, 
-                            protect_content=protect,
-                            reply_markup=button
-                        )
+                        sent = await client.send_document(t_id, document=path, thumb=thumb_path, caption=new_cap, protect_content=protect, reply_markup=button)
                         if os.path.exists(path): os.remove(path)
-                    
-                    # PATH B: Fast Copy/Forward (Instant)
                     else:
                         if forward_tag: 
                             sent = await client.forward_messages(t_id, sts.get('FROM'), [msg.id])
                         else: 
-                            sent = await client.copy_message(
-                                t_id, 
-                                sts.get('FROM'), 
-                                msg.id, 
-                                caption=new_cap, 
-                                protect_content=protect, 
-                                reply_markup=button
-                            )
+                            sent = await client.copy_message(t_id, sts.get('FROM'), msg.id, caption=new_cap, protect_content=protect, reply_markup=button)
                     
-                    # Auto Backup to Log Channel
                     if admin_backup: 
                         backup_msg = sent[0] if isinstance(sent, list) else sent
                         await backup_msg.copy(admin_backup)
-                        
-                except Exception as e: 
-                    logger.error(f"Target {target} Error: {e}")
+                except Exception as e: logger.error(f"Target Error: {e}")
             
             sts.add('total_files')
-            if msg.media and configs.get('duplicate'): 
-                await db.save_fingerprint(user, file_id)
-            
-            await asyncio.sleep(1.5) # Anti-Flood safety
+            if msg.media and configs.get('duplicate'): await db.save_fingerprint(user, file_id)
+            await asyncio.sleep(1.5)
 
     except Exception as e: 
         logger.error(f"Global Engine Error: {e}")
+        if m: await m.reply(f"<b>❌ Error:</b> <code>{e}</code>")
     finally:
         temp.lock[user] = False 
         await db.remove_task(user)
-        await edit(m, 'ᴄᴏᴍᴘʟᴇᴛᴇᴅ', "ᴄᴏᴍᴘʟᴇᴛᴇᴅ", sts)
-        if client.is_connected: await client.stop()
+        if m: # [FIX] Check kar rahe hain ki message object exist karta hai
+            await edit(m, 'ᴄᴏᴍᴘʟᴇᴛᴇᴅ', "ᴄᴏᴍᴘʟᴇᴛᴇᴅ", sts)
+        if client and client.is_connected: 
+            await client.stop()
 
 async def edit(msg, title, status, sts):
     if not msg: return
@@ -185,18 +168,13 @@ async def edit(msg, title, status, sts):
     bar = "█" * filled + "░" * (10 - filled)
     
     button = [[InlineKeyboardButton(f"[{bar}] {percentage}%", callback_data="none")]]
-    
     if status == "ᴄᴏᴍᴘʟᴇᴛᴇᴅ":
-        # Safe access for singular link
         fsub_link = getattr(Config, 'FORCE_SUB_CHANNEL', 'https://t.me/Silicon_Official')
         button.append([InlineKeyboardButton('💠 ᴜᴘᴅᴀᴛᴇ', url=fsub_link)])
     else: 
         button.append([InlineKeyboardButton('• ᴄᴀɴᴄᴇʟ', callback_data='terminate_frwd')])
     
     try:
-        await msg.edit(
-            TEXT.format(i.total, i.fetched, i.total_files, i.duplicate, "0", i.skip, "0", status, percentage, title), 
-            reply_markup=InlineKeyboardMarkup(button)
-        )
+        await msg.edit(TEXT.format(i.total, i.fetched, i.total_files, i.duplicate, "0", i.skip, "0", status, percentage, title), reply_markup=InlineKeyboardMarkup(button))
     except MessageNotModified: pass
-    except Exception as e: logger.error(f"Edit Error: {e}")
+    except Exception: pass
