@@ -12,42 +12,48 @@ from pyrogram import Client, filters, enums, __version__ as pyrogram_version
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaDocument
 
 # Professional Main Buttons (Elite V3 Branding)
+# Fix: Added a fallback for FORCE_SUB_CHANNEL to prevent crash
 main_buttons = [
     [InlineKeyboardButton('📖 ʜᴇʟᴘ & ᴄᴏᴍᴍᴀɴᴅs', callback_data='help')],
-    [InlineKeyboardButton('📢 ᴜᴘᴅᴀᴛᴇ ᴄʜᴀɴɴᴇʟ', url=f"{Config.FORCE_SUB_CHANNEL}")],
+    [InlineKeyboardButton('📢 ᴜᴘᴅᴀᴛᴇ ᴄʜᴀɴɴᴇʟ', url=getattr(Config, 'FORCE_SUB_CHANNEL', 'https://t.me/Silicon_Official'))],
     [InlineKeyboardButton('💳 sᴜᴘᴘᴏʀᴛ & ᴅᴏɴᴀᴛᴇ', callback_data='donate')]
 ]
 
-# =================== START FUNCTION (WITH MULTI-FORCE SUB) =================== #
+# =================== START FUNCTION (DYNAMIC MULTI-FSub) =================== #
 
 @Client.on_message(filters.private & filters.command(['start']))
 async def start(client, message):
     user = message.from_user
     
-    # --- [FEATURE] MULTIPLE FORCE SUBSCRIBE LOGIC ---
+    # --- [UPGRADED] MULTIPLE FORCE SUBSCRIBE LOGIC ---
     if Config.FORCE_SUB_ON:
         not_joined = []
+        # Saari IDs ko list se check karega
         for channel_id in Config.FORCE_SUB_CHANNELS:
             try:
                 member = await client.get_chat_member(channel_id, user.id)
                 if member.status == enums.ChatMemberStatus.BANNED:
                     return await message.reply_text("<b>❌ Error:</b> Aapko bot se ban kiya gaya hai.")
             except Exception:
-                # Agar join nahi kiya hai toh list mein add karein
+                # Agar join nahi hai toh list mein daal do
                 not_joined.append(channel_id)
 
         if not_joined:
             buttons = []
-            for i, ch_id in enumerate(not_joined, 1):
+            for ch_id in not_joined:
                 try:
+                    # Har ID ka asli naam aur link bot khud nikalega
                     chat = await client.get_chat(ch_id)
-                    buttons.append([InlineKeyboardButton(f"ᴊᴏɪɴ ᴄʜᴀɴɴᴇʟ {i} 📡", url=f"https://t.me/{chat.username}" if chat.username else Config.FORCE_SUB_CHANNEL)])
-                except:
+                    # Link check: Username hai toh wo, warna Invite Link generate karega
+                    link = f"https://t.me/{chat.username}" if chat.username else await client.export_chat_invite_link(ch_id)
+                    buttons.append([InlineKeyboardButton(f"ᴊᴏɪɴ {chat.title} 📡", url=link)])
+                except Exception as e:
+                    print(f"FSub Link Fetch Error: {e}")
                     continue
             
             buttons.append([InlineKeyboardButton("↻ ᴛʀʏ ᴀɢᴀɪɴ", url=f"https://t.me/{client.username}?start=start")])
             return await message.reply_text(
-                text=Translation.FORCE_MSG if hasattr(Translation, 'FORCE_MSG') else "<b>ᴘʟᴇᴀsᴇ ᴊᴏɪɴ ᴏᴜʀ ᴄʜᴀɴɴᴇʟs ᴛᴏ ᴜsᴇ ᴛʜɪs ʙᴏᴛ.</b>",
+                text="<b>⚠️ Access Denied!</b>\n\nAapne hamare mandatory channels join nahi kiye hain. Niche diye gaye buttons se join karein aur 'Try Again' par click karein.",
                 reply_markup=InlineKeyboardMarkup(buttons)
             )
 
@@ -56,7 +62,7 @@ async def start(client, message):
         await db.add_user(user.id, user.first_name)
         await client.send_message(
             chat_id=Config.LOG_CHANNEL,
-            text=f"<b>#NewUser</b>\n\n<b>ID:</b> <code>{user.id}</code>\n<b>Name:</b> {user.mention}\n<b>Date:</b> {datetime.datetime.now().strftime('%Y-%m-%d')}"
+            text=f"<b>#NewUser</b>\n\n<b>ID:</b> <code>{user.id}</code>\n<b>Name:</b> {user.mention}"
         )
     
     await message.reply_text(
@@ -93,26 +99,9 @@ async def back(bot, query):
        reply_markup=InlineKeyboardMarkup(main_buttons)
     )
 
-@Client.on_callback_query(filters.regex(r'^how_to_use'))
-async def how_to_use(bot, query):
-    await query.message.edit_text(
-        text=Translation.HOW_USE_TXT,
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('• ʙᴀᴄᴋ', callback_data='help')]]),
-        disable_web_page_preview=True
-    )
-
-@Client.on_callback_query(filters.regex(r'^about'))
-async def about(bot, query):
-    await query.message.edit_text(
-        text=Translation.ABOUT_TXT,
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('• ʙᴀᴄᴋ', callback_data='back')]]),
-        disable_web_page_preview=True
-    )
-
 @Client.on_callback_query(filters.regex(r'^status'))
 async def status(bot, query):
     users_count, bots_count = await db.total_users_bots_count()
-    # Active tasks count from temp global
     active_tasks = len(temp.lock)
     
     await query.message.edit_text(
@@ -126,8 +115,6 @@ async def status(bot, query):
 async def server_status(bot, query):
     ram = psutil.virtual_memory().percent
     cpu = psutil.cpu_percent()
-    
-    # Uptime Logic
     uptime = str(datetime.datetime.now() - datetime.datetime.fromtimestamp(psutil.boot_time())).split('.')[0]
     
     text = (
@@ -137,15 +124,10 @@ async def server_status(bot, query):
         f"<b>• Uptime:</b> <code>{uptime}</code>\n"
         f"<b>• Status:</b> <code>VPS Ready 🚀</code>"
     )
-    
-    await query.message.edit_text(
-        text=text,
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('• ʙᴀᴄᴋ', callback_data='status')]])
-    )
+    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('• ʙᴀᴄᴋ', callback_data='status')]]))
 
 @Client.on_callback_query(filters.regex(r'^donate'))
 async def donate_cb(bot, query):
-    # Donation hook logic as discussed
     text = (
         "<b>💳 sᴜᴘᴘᴏʀᴛ & ᴅᴏɴᴀᴛᴇ</b>\n\n"
         "Aapka support humein bot ko bade <b>VPS Servers</b> par host karne mein madad karta hai.\n\n"
@@ -154,10 +136,7 @@ async def donate_cb(bot, query):
         "• Faster processing speed.\n\n"
         "Contact Admin: @AK_ownerbot"
     )
-    await query.message.edit_text(
-        text=text,
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('• ʙᴀᴄᴋ', callback_data='back')]])
-    )
+    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('• ʙᴀᴄᴋ', callback_data='back')]]))
 
 # =================== DONATE COMMAND =================== #
 
