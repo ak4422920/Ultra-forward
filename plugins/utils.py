@@ -7,19 +7,21 @@ STATUS = {}
 
 def parse_buttons(text):
     """
-    Caption mein buttons add karne ke liye (Inline Buttons).
+    Caption mein custom inline buttons add karne ke liye.
     Format: [Name | Link]
     """
     from pyrogram.types import InlineKeyboardButton
     markup = []
     if not text: return None
-    for line in text.split('\n'):
-        row = []
-        for btn in line.split(','):
-            if '|' in btn:
-                name, url = btn.split('|')
-                row.append(InlineKeyboardButton(name.strip(), url=url.strip()))
-        markup.append(row)
+    try:
+        for line in text.split('\n'):
+            row = []
+            for btn in line.split(','):
+                if '|' in btn:
+                    name, url = btn.split('|')
+                    row.append(InlineKeyboardButton(name.strip(), url=url.strip()))
+            if row: markup.append(row)
+    except Exception: pass
     return markup if markup else None
 
 class STS:
@@ -28,13 +30,13 @@ class STS:
         self.data = STATUS
         
     def verify(self):
-        """Check karta hai ki memory mein task exist karta hai ya nahi."""
+        """Check karta hai ki task memory mein hai ya expired ho gaya."""
         return self.id in self.data
     
     def store(self, From, to, skip, total):
         """
         Forwarding setup save karta hai.
-        'to' ab ek string ya list ho sakti hai (Multi-Target Ready).
+        'to' ab ek multi-target string hai.
         """
         self.data[self.id] = {
             "FROM": From, 
@@ -52,12 +54,11 @@ class STS:
         return self
         
     def get(self, value=None, full=False):
-        """Memory se data nikalne ke liye."""
+        """Task memory se specifically data nikalne ke liye."""
         values = self.data.get(self.id)
         if not values: return None
         if not full:
-           mapping = {'FROM': 'FROM', 'TO': 'TO', 'skip': 'skip', 'total': 'total'}
-           return values.get(mapping.get(value, value))
+           return values.get(value)
            
         class DataObject:
             def __init__(self, d, id):
@@ -67,7 +68,7 @@ class STS:
         return DataObject(values, self.id)
 
     def add(self, key=None, value=1, time=False):
-        """Progress bar aur counters update karne ke liye."""
+        """Progress bar aur counters (stats) update karne ke liye."""
         if self.id not in self.data: return
         if time:
             self.data[self.id]['start'] = tm.time()
@@ -78,19 +79,20 @@ class STS:
     async def get_data(self, user_id):
         """
         DATABASE + CONFIG + MEMORY ka merger.
-        Engine ko jo bhi chahiye, sab yahan se milega.
+        Engine (regix.py) ko jo bhi asala-barood chahiye, sab yahan se milega.
         """
         bot_data = await db.get_bot(user_id)
         configs = await db.get_configs(user_id)
         
-        # Duplicate detection scope (Target channel based)
-        duplicate_data = configs.get('duplicate')
-        
-        # Keyword Mapper (Word replacement dictionary)
+        # Word Replacement logic (Keyword Mapper)
         word_map = configs.get('replace_words', {})
         
-        # Custom Buttons parsing
-        button = parse_buttons(configs.get('button', ''))
+        # Custom Buttons logic
+        button_text = configs.get('button', '')
+        button = parse_buttons(button_text)
+        
+        # Target list extraction (From saved targets or manual input)
+        targets = self.get('TO')
         
         return (
             bot_data, 
@@ -101,10 +103,11 @@ class STS:
                 'offset': self.get('skip'), 
                 'filters': configs.get('filters', {}),
                 'keywords': configs.get('keywords', []), 
-                'replace_words': word_map, # [NEW] Keyword Mapper
+                'replace_words': word_map, 
                 'extensions': configs.get('extension', []), 
-                'skip_duplicate': duplicate_data,
-                'thumbnail': configs.get('thumbnail') # [NEW] Thumbnail Path
+                'skip_duplicate': configs.get('duplicate'),
+                'thumbnail': configs.get('thumbnail'),
+                'targets': targets # [NEW] Integrated for engine routing
             }, 
             configs.get('protect'), 
             button
