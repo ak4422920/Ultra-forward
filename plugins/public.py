@@ -16,7 +16,7 @@ async def run(bot, message):
     # 1. 🤖 Worker Check
     _bot = await db.get_bot(user_id)
     if not _bot:
-      return await message.reply("<b>❌ Error:</b>\nAapne koi Bot/Userbot add nahi kiya hai. Pehle /settings mein jayein.")
+      return await message.reply("<b>❌ Error:</b>\nAapne koi Worker add nahi kiya hai. Pehle /settings mein jayein.")
     
     # 2. 🔒 Lock Check
     if temp.lock.get(user_id):
@@ -29,6 +29,7 @@ async def run(bot, message):
     
     chat_id = None
     if from_input.text:
+        # Improved Regex for all types of links
         regex = re.compile(r"(https://)?(t\.me/|telegram\.me/|telegram\.dog/)(c/)?(\d+|[a-zA-Z_0-9]+)/(\d+)$")
         match = regex.match(from_input.text.replace("?single", ""))
         if match:
@@ -38,17 +39,19 @@ async def run(bot, message):
             return await message.reply('<b>❌ Invalid Link!</b> Sahi message link bhejein.')
     elif from_input.forward_from_chat:
         chat_id = from_input.forward_from_chat.id
+    
+    if not chat_id:
+        return await message.reply("<b>❌ Error:</b> Source channel ki pehchan nahi ho saki.")
 
-    # 4. 📥 Target Selection (Elite Upgrade: Saved Targets)
+    # 4. 📥 Target Selection (Saved Targets Integration)
     configs = await db.get_configs(user_id)
     saved_targets = configs.get('targets')
     
     t_btn = None
     t_text = Translation.TO_MSG
     
-    # Agar targets save hain toh button dikhao
     if saved_targets:
-        t_text += f"\n\n<b>🎯 Saved Targets found:</b>\n<code>{saved_targets}</code>\n\nNiche button dabiye ya naya ID bhejein."
+        t_text += f"\n\n<b>🎯 Saved Targets:</b>\n<code>{saved_targets}</code>\n\nNiche button dabiye ya naya ID bhejein."
         t_btn = InlineKeyboardMarkup([[InlineKeyboardButton("🎯 Use Saved Targets", callback_data="use_saved_targets")]])
     
     to_input = await bot.ask(message.chat.id, t_text, reply_markup=t_btn)
@@ -56,8 +59,7 @@ async def run(bot, message):
     if to_input.text and to_input.text.startswith('/'):
         return await message.reply(Translation.CANCEL)
 
-    # Logic: Agar user ne button click kiya toh saved_targets use honge, warna input text
-    # Note: Callback logic handled in memory
+    # Logic: Agar button dabaya toh to_input.text khali hoga
     target_ids = saved_targets if not to_input.text else to_input.text.replace(" ", "")
 
     # 5. ⏩ Skip Messages
@@ -72,10 +74,10 @@ async def run(bot, message):
     
     confirm_text = (
         "<b>📋 ꜰᴏʀᴡᴀʀᴅɪɴɢ sᴇᴛᴜᴘ ʀᴇᴀᴅʏ</b>\n\n"
-        f"<b>📤 Source ID:</b> <code>{chat_id}</code>\n"
+        f"<b>📤 Source:</b> <code>{chat_id}</code>\n"
         f"<b>📥 Targets:</b> <code>{target_ids}</code>\n"
         f"<b>⏩ Skip:</b> <code>{skip_val}</code>\n\n"
-        "<i>Kya aap shuru karna chahte hain?</i>"
+        "<i>Ready to launch?</i>"
     )
 
     buttons = [[
@@ -85,7 +87,7 @@ async def run(bot, message):
 
     await message.reply_text(text=confirm_text, reply_markup=InlineKeyboardMarkup(buttons))
     
-    # Task memory mein store karna
+    # Store in memory
     STS(forward_id).store(chat_id, target_ids, skip_val, 0)
 
 # =================== CALLBACK HANDLERS =================== #
@@ -96,5 +98,6 @@ async def close_callback(bot, query):
 
 @Client.on_callback_query(filters.regex(r'^use_saved_targets'))
 async def use_saved_callback(bot, query):
-    # Sirf answer dena hai taaki button click effect aaye, logic 'ask' handler sambhal lega
+    # Answer query and edit message to remove buttons so 'ask' continues
     await query.answer("✅ Saved Targets Selected!", show_alert=False)
+    await query.message.edit_text("<b>🎯 Saved Targets Selected!</b>\nAb agla step follow karein...")
