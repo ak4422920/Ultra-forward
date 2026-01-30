@@ -28,13 +28,55 @@ async def settings_query(bot, query):
        "<b>⚙️ ꜰᴏʀᴡᴀʀᴅ ᴇʟɪᴛᴇ ᴠ3: ᴄᴏɴᴛʀᴏʟ ᴘᴀɴᴇʟ</b>",
        reply_markup=main_buttons())
 
-  # --- [FEATURE] SMART THUMBNAIL MENU ---
+  # --- [FEATURE] SAVED TARGETS (Multi-ID Fix) ---
+  elif type == "manage_targets":
+     configs = await get_configs(user_id)
+     targets = configs.get('targets', 'Not Set')
+     text = (
+         "<b>🎯 sᴀᴠᴇᴅ ᴛᴀʀɢᴇᴛs</b>\n\n"
+         f"Current IDs: <code>{targets}</code>\n\n"
+         "In IDs ko set karne ke baad aapko <code>/forward</code> setup ke waqt baar-baar IDs type nahi karni padengi."
+     )
+     btn = [[InlineKeyboardButton('🖋️ Edit Saved Targets', callback_data="settings#set_targets")], back_btn]
+     await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(btn))
+
+  elif type == "set_targets":
+     await query.message.delete()
+     ask = await bot.ask(user_id, "<b>IDs Bhejein:</b>\n\nJin channels mein forward karna hai unki IDs comma (,) se alag karke bhejein.\n\nExample: <code>-100123, -100456, -100789</code>")
+     if ask.text and not ask.text.startswith('/'):
+         clean_ids = ask.text.replace(" ", "")
+         await update_configs(user_id, 'targets', clean_ids)
+         await bot.send_message(user_id, "✅ **Targets Saved!**\nAb setup ke waqt 'Use Saved Targets' ka button dikhega.", reply_markup=InlineKeyboardMarkup([back_btn]))
+     else:
+         await bot.send_message(user_id, "❌ **Cancelled!**", reply_markup=InlineKeyboardMarkup([back_btn]))
+
+  # --- [FIX] CAPTION EDITING ---
+  elif type == "caption":
+     configs = await get_configs(user_id)
+     cap = configs.get('caption', 'Default')
+     text = f"<b>🖋️ ᴄᴜsᴛᴏᴍ ᴄᴀᴘᴛɪᴏɴ</b>\n\n<b>Current:</b>\n<code>{cap}</code>"
+     btn = [[InlineKeyboardButton('🖋️ Edit Caption', callback_data="settings#addcaption")], back_btn]
+     await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(btn))
+
+  elif type == "addcaption":
+     await query.message.delete()
+     prompt = (
+         "<b>Bhai, apni Custom Caption bhejein:</b>\n\n"
+         "Variables jo aap use kar sakte hain:\n"
+         "• <code>{filename}</code> - File ka naam\n"
+         "• <code>{size}</code> - File ka size\n"
+         "• <code>{caption}</code> - Original caption"
+     )
+     ask = await bot.ask(user_id, prompt)
+     if ask.text and not ask.text.startswith('/'):
+         await update_configs(user_id, 'caption', ask.text)
+         await bot.send_message(user_id, "✅ **Caption Updated Successfully!**", reply_markup=InlineKeyboardMarkup([back_btn]))
+
+  # --- THUMBNAIL MENU ---
   elif type == "thumbnail":
      configs = await get_configs(user_id)
      thumb = configs.get('thumbnail')
-     # Translation se dynamic warning uthana (with VPS limit)
      text = Translation.THUMBNAIL_HELP.format(limit=Config.THUMB_LIMIT)
-     
      btn = [[InlineKeyboardButton('🖼️ Set Thumbnail', callback_data="settings#set_thumb")]]
      if thumb:
          btn.append([InlineKeyboardButton('🗑️ Delete Thumbnail', callback_data="settings#del_thumb")])
@@ -43,58 +85,17 @@ async def settings_query(bot, query):
 
   elif type == "set_thumb":
      await query.message.delete()
-     ask = await bot.ask(user_id, Translation.THUMB_MESS if hasattr(Translation, 'THUMB_MESS') else "<b>Bhai, thumbnail ki photo bhejein:</b>")
+     ask = await bot.ask(user_id, "<b>Bhai, thumbnail ki photo bhejein:</b>")
      if ask.photo:
          await update_configs(user_id, 'thumbnail', ask.photo.file_id)
-         await bot.send_message(user_id, "✅ **Thumbnail Set!**\nAb aapka task automatically restricted limit par chalega.", reply_markup=InlineKeyboardMarkup([back_btn]))
-     else:
-         await bot.send_message(user_id, "❌ **Error:** Sirf photo bhejein.", reply_markup=InlineKeyboardMarkup([back_btn]))
+         await bot.send_message(user_id, "✅ **Thumbnail Set!**", reply_markup=InlineKeyboardMarkup([back_btn]))
 
   elif type == "del_thumb":
      await update_configs(user_id, 'thumbnail', None)
      await query.answer("Thumbnail Deleted! 🗑️", show_alert=True)
-     await query.message.edit_text("✅ Thumbnail removed. Unlimited forwarding restored!", reply_markup=InlineKeyboardMarkup([back_btn]))
+     await query.message.edit_text("✅ Thumbnail removed.", reply_markup=InlineKeyboardMarkup([back_btn]))
 
-  # --- [FEATURE] KEYWORD MAPPER (REPLACEMENTS) ---
-  elif type == "replacements":
-     configs = await get_configs(user_id)
-     words = configs.get('replace_words', {})
-     text = "<b><u>🔀 ᴋᴇʏᴡᴏʀᴅ ᴍᴀᴘᴘᴇʀ</u></b>\n\nCaptions mein words change karne ke liye:\n"
-     for old, new in words.items():
-         text += f"• <code>{old}</code> ➜ <code>{new if new else '[DELETED]'}</code>\n"
-     if not words: text += "<i>No replacements active.</i>"
-     
-     btn = [
-         [InlineKeyboardButton('✚ Add Word', callback_data="settings#add_rep")],
-         [InlineKeyboardButton('🗑️ Clear All', callback_data="settings#clear_rep")],
-         back_btn
-     ]
-     await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(btn))
-
-  elif type == "add_rep":
-     await query.message.delete()
-     ask = await bot.ask(user_id, "<b>Format:</b> <code>OldWord : NewWord</code>\n\n(Example: <code>@OldChannel : @MyChannel</code>)")
-     if ask.text and ":" in ask.text:
-         old, new = [i.strip() for i in ask.text.split(":", 1)]
-         configs = await get_configs(user_id)
-         words = configs.get('replace_words', {})
-         words[old] = new
-         await update_configs(user_id, 'replace_words', words)
-         await bot.send_message(user_id, f"✅ Mapping Saved: `{old}` -> `{new}`", reply_markup=InlineKeyboardMarkup([back_btn]))
-
-  # --- [FEATURE] DONATE & VPS HOOK ---
-  elif type == "donate":
-     # Donation message with the VPS upgrade reason
-     text = (
-         "<b>💖 sᴜᴘᴘᴏʀᴛ & ᴅᴏɴᴀᴛᴇ</b>\n\n"
-         "Agar aapko ye bot pasand hai aur aap <b>Thumbnail ke sath Unlimited Forwarding</b> chahte hain, "
-         "toh consider karein donate karna.\n\n"
-         "Aapka support humein bot ko bade <b>VPS Servers</b> par host karne mein madad karega! 🚀"
-     )
-     btn = [[InlineKeyboardButton("💬 Contact Admin", url="https://t.me/AK_ownerbot")], back_btn]
-     await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(btn))
-
-  # --- BOTS & USERBOTS ---
+  # --- BOTS & WORKERS ---
   elif type == "bots":
      _bot = await db.get_bot(user_id)
      btn = [] 
@@ -103,46 +104,30 @@ async def settings_query(bot, query):
      else:
         btn.append([InlineKeyboardButton('✚ Add Bot Token', callback_data="settings#addbot")])
      btn.append([InlineKeyboardButton('📲 Add Userbot (Session)', callback_data="settings#adduserbot")])
-     btn.append([InlineKeyboardButton('🔑 Add Userbot (Login)', callback_data="settings#addlogin")])
      btn.append(back_btn)
      await query.message.edit_text("<b>🤖 ᴍᴀɴᴀɢᴇ ᴡᴏʀᴋᴇʀs</b>", reply_markup=InlineKeyboardMarkup(btn))
 
-  # --- FILTERS & PROTECT ---
+  # --- FILTERS & STATS & DONATE ---
   elif type == "filters":
      await query.message.edit_text("<b>🕵️ ꜰᴏʀᴡᴀʀᴅɪɴɢ ꜰɪʟᴛᴇʀs</b>", reply_markup=await filters_buttons(user_id))
 
-  elif type == "nextfilters":
-     await query.edit_message_reply_markup(reply_markup=await next_filters_buttons(user_id))
-
-  elif "updatefilter" in type:
-     i, key, val = type.split('-')
-     new_val = False if val == "True" else True
-     configs = await get_configs(user_id)
-     if key in ["forward_tag", "duplicate", "protect"]:
-         await update_configs(user_id, key, new_val)
-     else:
-         f = configs.get('filters', {})
-         f[key] = new_val
-         await update_configs(user_id, 'filters', f)
-     
-     markup = await next_filters_buttons(user_id) if key in ['poll', 'protect'] else await filters_buttons(user_id)
-     await query.edit_message_reply_markup(reply_markup=markup)
-
-  # --- STATS ---
   elif type == "stats":
      users, bots = await db.total_users_bots_count()
      await query.message.edit_text(
-        f"<b>📊 ʙᴏᴛ sᴛᴀᴛɪsᴛɪᴄs</b>\n\n👤 Total Users: <code>{users}</code>\n🤖 Active Workers: <code>{bots}</code>\n🌐 Server: <code>Koyeb (VPS Ready)</code>",
+        f"<b>📊 ʙᴏᴛ sᴛᴀᴛɪsᴛɪᴄs</b>\n\n👤 Users: <code>{users}</code>\n🤖 Workers: <code>{bots}</code>\n🌐 Server: <code>Elite V3 Ready</code>",
         reply_markup=InlineKeyboardMarkup([back_btn]))
+
+  elif type == "donate":
+     await query.message.edit_text(Translation.DONATE_TXT, reply_markup=InlineKeyboardMarkup([back_btn]))
 
 # ================= UI HELPERS ================= #
 
 def main_buttons():
   buttons = [
     [InlineKeyboardButton('🤖 Workers', 'settings#bots'), InlineKeyboardButton('🖋️ Caption', 'settings#caption')],
-    [InlineKeyboardButton('🖼️ Thumbnail', 'settings#thumbnail'), InlineKeyboardButton('🔀 Mapper', 'settings#replacements')],
-    [InlineKeyboardButton('🕵️ Filters', 'settings#filters'), InlineKeyboardButton('📊 Stats', 'settings#stats')],
-    [InlineKeyboardButton('💖 Support', 'settings#donate'), InlineKeyboardButton('🧪 Extra', 'settings#nextfilters')],
+    [InlineKeyboardButton('🖼️ Thumbnail', 'settings#thumbnail'), InlineKeyboardButton('🎯 Saved Targets', 'settings#manage_targets')],
+    [InlineKeyboardButton('🔀 Mapper', 'settings#replacements'), InlineKeyboardButton('🕵️ Filters', 'settings#filters')],
+    [InlineKeyboardButton('📊 Stats', 'settings#stats'), InlineKeyboardButton('💖 Support', 'settings#donate')],
     [InlineKeyboardButton('• ᴄʟᴏsᴇ •', callback_data='help')]
   ]
   return InlineKeyboardMarkup(buttons)
