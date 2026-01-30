@@ -27,8 +27,9 @@ async def broadcast(bot, message):
     success = 0
 
     # Engine for sequential broadcasting to avoid Telegram spam filters 
+    
+    
     async for user in users:
-        # User ID check
         u_id = int(user['id'])
         
         # Broadcast logic
@@ -51,7 +52,7 @@ async def broadcast(bot, message):
             try:
                 await sts.edit(
                     f"<b>📢 ʙʀᴏᴀᴅᴄᴀsᴛ ɪɴ ᴘʀᴏɢʀᴇss...</b>\n\n"
-                    f"• <b>Total:</b> <code>{total_users}</code>\n"
+                    f"• <b>Total Users:</b> <code>{total_users}</code>\n"
                     f"• <b>Processed:</b> <code>{done}</code>\n"
                     f"• <b>Success:</b> ✅ <code>{success}</code>\n"
                     f"• <b>Blocked:</b> 🚫 <code>{blocked}</code>\n"
@@ -73,26 +74,27 @@ async def broadcast(bot, message):
         f"• Blocked: <code>{blocked}</code>\n"
         f"• Deleted: <code>{deleted}</code>\n"
         f"• Failed: <code>{failed}</code>\n\n"
-        f"<i>Database automatically updated.</i>"
+        f"<i>Database automatically cleaned.</i>"
     )
     
     await sts.edit(final_text)
 
 async def broadcast_messages(user_id, message):
     try:
-        # copying the message is better than forwarding (no tag)
+        # copy_message is best as it doesn't show "forwarded from" tag
         await message.copy(chat_id=user_id)
         return True, "Success"
     except FloodWait as e:
         await asyncio.sleep(e.value)
         return await broadcast_messages(user_id, message)
     except InputUserDeactivated:
-        # Automatic Database Cleanup
+        # User deleted account - Remove from DB
         await db.delete_user(user_id)
-        logger.warning(f"User {user_id} deleted account. Removed from DB.")
         return False, "Deleted"
     except UserIsBlocked:
-        logger.info(f"User {user_id} blocked the bot.")
+        # User blocked bot - Optional: keep in DB or remove. 
+        # Removing keeps DB clean for next broadcast.
+        await db.delete_user(user_id) 
         return False, "Blocked"
     except Exception as e:
         logger.error(f"Broadcast Error for {user_id}: {e}")
