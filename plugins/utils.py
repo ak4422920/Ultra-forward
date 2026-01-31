@@ -8,12 +8,18 @@ class STS:
     def __init__(self, id):
         self.id = id
         self.data = STATUS
+    
+    # [FIX] Added this method to safely initialize data without errors
+    def set(self, key, value):
+        if self.id not in self.data:
+            self.data[self.id] = {}
+        self.data[self.id][key] = value
         
     def verify(self):
         return self.data.get(self.id)
     
     def store(self, From, to, skip, limit):
-        # Feature 2: Support for Multi-Target logic
+        # Initializes the full task structure
         self.data[self.id] = {
             "FROM": From, 
             'TO': to, 
@@ -32,6 +38,8 @@ class STS:
         
     def get(self, value=None, full=False):
         values = self.data.get(self.id)
+        if not values: 
+            return None
         if not full:
            return values.get(value)
         for k, v in values.items():
@@ -39,9 +47,19 @@ class STS:
         return self
 
     def add(self, key=None, value=1, time=False):
+        # [FIX] Safer add logic that creates the user entry if missing
+        if self.id not in self.data:
+            self.data[self.id] = {}
+            
         if time:
           return self.data[self.id].update({'start': tm.time()})
-        self.data[self.id].update({key: self.get(key) + value}) 
+        
+        # [FIX] Safely handle missing keys by defaulting to 0
+        current_val = self.get(key)
+        if current_val is None:
+            current_val = 0
+            
+        self.data[self.id].update({key: current_val + value}) 
     
     def divide(self, no, by):
        by = 1 if int(by) == 0 else by 
@@ -61,7 +79,6 @@ class STS:
         if configs['file_size'] != 0:
             size = [configs['file_size'], configs['size_limit']]
             
-        # Returning extended configuration for all new features
         return bot, configs['caption'], configs['forward_tag'], {
             'chat_id': k.FROM, 
             'limit': k.limit, 
@@ -73,9 +90,9 @@ class STS:
             'protect': configs['protect'], 
             'extension': configs['extension'], 
             'size': size,
-            'replace_text': configs.get('replace_text'), # Feature 5: Word Replace
-            'remove_text': configs.get('remove_text'),   # Feature 6: Word Remover
-            'thumbnail': configs.get('thumbnail'),       # Custom Thumbnail ID
-            'thumb_toggle': configs.get('thumb_toggle'), # Thumbnail Switch
-            'workers': configs.get('workers', 1)         # Feature 12: Workers count
+            'replace_text': configs.get('replace_text'),
+            'remove_text': configs.get('remove_text'),
+            'thumbnail': configs.get('thumbnail'),
+            'thumb_toggle': configs.get('thumb_toggle'),
+            'workers': configs.get('workers', 1)
         }
