@@ -1,72 +1,60 @@
 import os
 import re 
 import sys
+import typing
 import asyncio 
 import logging 
 from database import db 
 from config import Config, temp
-from pyrogram import Client, filters, enums
-from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message 
+from pyrogram import Client, filters
+from pyrogram.raw.all import layer
+from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery, Message 
+from pyrogram.errors.exceptions.bad_request_400 import AccessTokenExpired, AccessTokenInvalid
 from pyrogram.errors import (
-    FloodWait, 
-    PhoneNumberInvalid, 
-    SessionPasswordNeeded,
-    PhoneCodeInvalid,
-    PhoneCodeExpired
+    FloodWait, PhoneNumberInvalid, PhoneCodeInvalid, 
+    PhoneCodeExpired, SessionPasswordNeeded, PasswordHashInvalid
 )
 from translation import Translation
+from typing import Union, Optional, AsyncGenerator
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
-# --- Regex for Professional Button Parsing ---
-# Format: [Google][buttonurl:https://google.com]
 BTN_URL_REGEX = re.compile(r"(\[([^\[]+?)]\[buttonurl:/{0,2}(.+?)(:same)?])")
+BOT_TOKEN_TEXT = "<b>1) create a bot using @BotFather\n2) Then you will get a message with bot token\n3) Forward that message to me</b>"
+SESSION_STRING_SIZE = 351
 
-# ================= CONFIGURATION MANAGER ================= #
-
-async def get_configs(user_id):
-    """Database se user ki saari settings fetch karta hai."""
-    return await db.get_configs(user_id)
-
-async def update_configs(user_id, key, value):
-    """
-    Elite V3 Features (Thumbnail, Mapper, Targets) ko register karne ka main function.
-    """
-    current = await db.get_configs(user_id)
-    
-    # Root level settings for fast access
-    root_keys = [
-        'caption', 'duplicate', 'db_uri', 'forward_tag', 
-        'protect', 'file_size', 'button', 'replace_words', 
-        'admin_backup', 'thumbnail', 'targets' 
-    ]
-    
-    if key in root_keys:
-        current[key] = value
-    else: 
-        if 'filters' not in current: 
-            current['filters'] = {}
-        current['filters'][key] = value
-        
-    await db.update_configs(user_id, current)
-
-# ================= WORKER ENGINE INITIALIZER ================= #
-
-async def start_clone_bot(FwdBot):
-   """
-   Client ko start karke usme iterator inject karta hai smoothly history scan ke liye.
-   """
-   if not FwdBot.is_connected:
-       await FwdBot.start()
+async def start_clone_bot(FwdBot, data=None):
+   await FwdBot.start()
    
-   async def iter_messages(chat_id, limit, offset_id=0):
-        async for message in FwdBot.get_chat_history(chat_id, limit=limit, offset_id=offset_id):
-            yield message
-                
-   FwdBot.iter_messages = iter_messages
+   async def iter_messages(
+      self, 
+      chat_id: Union[int, str], 
+      limit: int, 
+      offset: int = 0,
+      search: str = None,
+      filter: "types.TypeMessagesFilter" = None,
+      ) -> Optional[AsyncGenerator["types.Message", None]]:
+        current = offset
+        while True:
+            new_diff = min(200, limit - current)
+            if new_diff <= 0:
+                return
+            messages = await self.get_messages(chat_id, list(range(current, current+new_diff+1)))
+            for message in messages:
+                yield message
+                current += 1
+   
+   FwdBot.iter_messages = iter_messages.__get__(FwdBot)
+   
+   # Feature 12: Worker Management (Session storage in memory)
+   try:
+       me = await FwdBot.get_me()
+       temp.ACTIVE_WORKERS[me.id] = FwdBot
+   except Exception as e:
+       logger.error(f"Worker session error: {e}")
+       
    return FwdBot
-
-# ================= CLIENT MANAGEMENT (ELITE V3) ================= #
 
 class CLIENT: 
   def __init__(self):
@@ -74,96 +62,211 @@ class CLIENT:
      self.api_hash = Config.API_HASH
     
   def client(self, data, user=None):
-     """
-     Ye function In-Memory clients banata hai.
-     Fayda: Session files storage nahi bharti.
-     """
-     if user is None and isinstance(data, dict) and data.get('is_bot') == False:
-        # Userbot (Session String)
-        return Client(
-            name=f"user_{data['user_id']}", 
-            api_id=self.api_id, 
-            api_hash=self.api_hash, 
-            session_string=data.get('session'), 
-            in_memory=True 
-        )
-     elif user is True:
-        # String Session validation during login
-        return Client(name="val_session", api_id=self.api_id, api_hash=self.api_hash, session_string=data, in_memory=True)
-     
-     # Normal Bot Worker (Token)
-     token = data if isinstance(data, str) else data.get('token')
-     return Client(name="bot_worker", api_id=self.api_id, api_hash=self.api_hash, bot_token=token, in_memory=True)
-  
+     if user == None and data.get('is_bot') == False:
+        return Client("USERBOT", self.api_id, self.api_hash, session_string=data.get('session'))
+     elif user == True:
+        return Client("USERBOT", self.api_id, self.api_hash, session_string=data)
+     elif user != False:
+        data = data.get('token')
+     return Client("BOT", self.api_id, self.api_hash, bot_token=data, in_memory=True)
+
   async def add_bot(self, bot, message):
-     """Bot Token ke zariye worker add karna."""
      user_id = int(message.from_user.id)
-     prompt = "<b>1) @BotFather se naya bot banayein.\n2) Uska API Token copy karein.\n3) Token yahan bhej dein.\n\n/cancel - To Stop.</b>"
-     msg = await bot.ask(chat_id=user_id, text=prompt)
-     if msg.text == '/cancel': return await msg.reply('❌ Process Cancelled!')
-     
-     token_match = re.findall(r'\d[0-9]{8,10}:[0-9A-Za-z_-]{35}', msg.text)
-     bot_token = token_match[0] if token_match else None
-     if not bot_token: return await msg.reply_text("<b>❌ Error:</b> Sahi token format bhejein.")
-       
-     sts = await msg.reply_text("<code>Authenticating Bot...</code>")
+     msg = await bot.ask(chat_id=user_id, text=BOT_TOKEN_TEXT)
+     if msg.text=='/cancel':
+        return await msg.reply('<b>process cancelled !</b>')
+     elif not msg.forward_date:
+       return await msg.reply_text("<b>This is not a forward message</b>")
+     elif str(msg.forward_from.id) != "93372553":
+       return await msg.reply_text("<b>This message was not forward from bot father</b>")
+     bot_token = re.findall(r'\d[0-9]{8,10}:[0-9A-Za-z_-]{35}', msg.text, re.IGNORECASE)
+     bot_token = bot_token[0] if bot_token else None
+     if not bot_token:
+       return await msg.reply_text("<b>There is no bot token in that message</b>")
      try:
-       _client = await start_clone_bot(self.client(bot_token, False))
-       _bot = _client.me
-       details = {
-           'id': _bot.id, 'is_bot': True, 'user_id': user_id, 
-           'name': _bot.first_name, 'token': bot_token, 'username': _bot.username
-       }
-       await db.add_bot(details)
-       await sts.edit(f"<b>✅ Bot Worker Added!</b>\n\n<b>Name:</b> {_bot.first_name}")
-       await _client.stop()
-       return True
+       _client = await start_clone_bot(self.client(bot_token, False), True)
      except Exception as e:
-       await sts.edit(f"<b>❌ Failure:</b> `{e}`")
-       return False
+       await msg.reply_text(f"<b>BOT ERROR:</b> `{e}`")
+     _bot = _client.me
+     details = {
+       'id': _bot.id,
+       'is_bot': True,
+       'user_id': user_id,
+       'name': _bot.first_name,
+       'token': bot_token,
+       'username': _bot.username 
+     }
+     await db.add_bot(details)
+     return True
 
   async def add_login(self, bot, message):
-    """Phone login system (OTP + 2FA support)."""
     user_id = int(message.from_user.id)
-    await bot.send_message(user_id, "<b>📲 Number bhejein (+ Country Code).\nExample: <code>+919876543210</code>\n/cancel - Stop.</b>")
-    phone_msg = await bot.ask(user_id, "Mobile Number?", filters=filters.text)
-    if phone_msg.text.startswith('/'): return
-        
-    client = Client(name="user", api_id=self.api_id, api_hash=self.api_hash, in_memory=True)
+    api_id = Config.API_ID
+    api_hash = Config.API_HASH
+    disclaimer_text = "<b><blockquote>**<u>⚠️ Warning ⚠️</u>**:\n\n If you already have a session string, please use the add user bot. Otherwise, you can use login.</blockquote>"
+    await bot.send_message(user_id, text=disclaimer_text)
+    t = "➫ ᴘʟᴇᴀsᴇ sᴇɴᴅ ʏᴏᴜʀ ᴘʜᴏɴᴇ ɴᴜᴍʙᴇʀ ᴡɪᴛʜ ᴄᴏᴜɴᴛʀʏ ᴄᴏᴅᴇ ғᴏʀ ᴡʜɪᴄʜ ʏᴏᴜ ᴡᴀɴᴛ ᴛᴏ ɢᴇɴᴇʀᴀᴛᴇ sᴇssɪᴏɴ \n➫ ᴇxᴀᴍᴘʟᴇ: +910000000000\n/cancel - ᴛᴏ ᴄᴀɴᴄᴇʟ ᴛʜɪs ᴘʀᴏᴄᴇss"
+    phone_number_msg = await bot.ask(user_id, t, filters=filters.text)
+    if phone_number_msg.text and phone_number_msg.text.startswith('/'):
+        await bot.send_message(user_id, "<b>Process cancelled!</b>")
+        return
+    phone_number = phone_number_msg.text
+    await bot.send_message(user_id, "ᴛʀʏɪɴɢ ᴛᴏ sᴇɴᴅ ᴏᴛᴩ ᴀᴛ ᴛʜᴇ ɢɪᴠᴇɴ ɴᴜᴍʙᴇʀ...")
+    client = Client(name="user", api_id=api_id, api_hash=api_hash, in_memory=True)
     await client.connect()
-    
     try:
-        code = await client.send_code(phone_msg.text)
-        otp_prompt = "<b>📩 OTP check karein (Official Telegram app mein).</b>\n\nOTP ke beech mein space dein (Ex: <code>1 2 3 4 5</code>)."
-        otp_msg = await bot.ask(user_id, otp_prompt, filters=filters.text, timeout=300)
-        await client.sign_in(phone_msg.text, code.phone_code_hash, otp_msg.text.replace(" ", ""))
+        code = await client.send_code(phone_number)
+    except PhoneNumberInvalid:
+        await bot.send_message(user_id, "The phone number you've sent doesn't belong to any Telegram account.\n\n➫ Please start generating your session again.")
+        return
+    try:
+        phone_code_msg = await bot.ask(user_id, "Please send the OTP that you've received from Telegram on your account.\n➫ If OTP is 12345, please send it as 1 2 3 4 5.", filters=filters.text, timeout=600)
+        if phone_code_msg.text and phone_code_msg.text.startswith('/'):
+            await bot.send_message(user_id, "<b>Process cancelled!</b>")
+            return
+    except TimeoutError:
+        await bot.send_message(user_id, "Time limit reached of 10 minutes.\n\nPlease start generating your session again.")
+        return
+    phone_code = phone_code_msg.text.replace(" ", "")
+    try:
+        await client.sign_in(phone_number, code.phone_code_hash, phone_code)
+    except PhoneCodeInvalid:
+        await bot.send_message(user_id, "The OTP you've sent is wrong.\n\nPlease start generating your session again.")
+        return
+    except PhoneCodeExpired:
+        await bot.send_message(user_id, "The OTP you've sent is expired.\n\nPlease start generating your session again.")
+        return
     except SessionPasswordNeeded:
-        pwd = await bot.ask(user_id, "<b>🔐 2FA Security:</b>\n\nAapka password mang raha hai, bhejye.", filters=filters.text)
-        await client.check_password(password=pwd.text)
-    except Exception as e:
-        return await bot.send_message(user_id, f"<b>❌ Login Failed:</b> `{e}`")
-
+        try:
+            two_step_msg = await bot.ask(user_id, "Please enter your two-step verification password to continue.", filters=filters.text, timeout=300)
+            if two_step_msg.text and two_step_msg.text.startswith('/'):
+                await bot.send_message(user_id, "<b>Process cancelled!</b>")
+                return
+        except TimeoutError:
+            await bot.send_message(user_id, "Time limit reached of 5 minutes.\n\nPlease start generating your session again.")
+            return
+        try:
+            password = two_step_msg.text
+            await client.check_password(password=password)
+        except PasswordHashInvalid:
+            await bot.send_message(user_id, "The password you've sent is wrong.\n\nPlease start generating your session again.")
+            return
     string_session = await client.export_session_string()
+    if len(string_session) < SESSION_STRING_SIZE:
+        await bot.send_message(user_id, "<b>Invalid session string.</b>")
+        return
+    text = f"➫ This is your pyrogram v2 string session:\n\n<code>{string_session}</code>\n\nNote: Don't share it with anyone."
+    await bot.send_message(user_id, text)
     user = await client.get_me()
-    await db.add_bot({
-        'id': user.id, 'is_bot': False, 'user_id': user_id, 
-        'name': user.first_name, 'session': string_session, 'username': user.username
-    })
-    await bot.send_message(user_id, f"<b>✅ Userbot Elite Connected!</b>\n\n<b>Name:</b> {user.first_name}")
+    details = {
+        'id': user.id,
+        'is_bot': False,
+        'user_id': user_id,
+        'name': user.first_name,
+        'session': string_session,
+        'username': user.username
+    }
+    await db.add_bot(details)
     await client.disconnect()
-    return True
+    return details    
+    
+  async def add_session(self, bot, message):
+     user_id = int(message.from_user.id)
+     text = "<b>⚠️ DISCLAIMER ⚠️</b>\n\n<code>you can use your session for forward message from private chat to another chat.\nPlease add your pyrogram session with your own risk. Their is a chance to ban your account. My developer is not responsible if your account may get banned.</code>"
+     await bot.send_message(user_id, text=text)
+     msg = await bot.ask(chat_id=user_id, text="<b>send your pyrogram session.\nget it from any sessiongenbot\n\n/cancel - cancel the process</b>")
+     if msg.text=='/cancel':
+        return await msg.reply('<b>process cancelled !</b>')
+     elif len(msg.text) < SESSION_STRING_SIZE:
+        return await msg.reply('<b>invalid session sring</b>')
+     try:
+       client = await start_clone_bot(self.client(msg.text, True), True)
+     except Exception as e:
+       await msg.reply_text(f"<b>USER BOT ERROR:</b> `{e}`")
+     user = client.me
+     details = {
+       'id': user.id,
+       'is_bot': False,
+       'user_id': user_id,
+       'name': user.first_name,
+       'session': msg.text,
+       'username': user.username
+     }
+     await db.add_bot(details)
+     return True
+    
+@Client.on_message(filters.private & filters.command('reset'))
+async def forward_tag(bot, m):
+    try:
+        default = await db.get_configs("01")
+        await db.update_configs(m.from_user.id, default)
+        await m.reply("Successfully reset settings ✔️")
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        await m.reply("An error occurred while resetting settings. Please try again later.")
 
-# ================= BUTTON PARSER ================= #
+@Client.on_message(filters.command('resetall') & filters.user(Config.BOT_OWNER_ID))
+async def resetall(bot, message):
+  users = await db.get_all_users()
+  sts = await message.reply("**processing**")
+  TEXT = "total: {}\nsuccess: {}\nfailed: {}\nexcept: {}"
+  total = success = failed = already = 0
+  ERRORS = []
+  async for user in users:
+      user_id = user['id']
+      default = await get_configs(user_id)
+      default['db_uri'] = None
+      total += 1
+      if total %10 == 0:
+         await sts.edit(TEXT.format(total, success, failed, already))
+      try: 
+         await db.update_configs(user_id, default)
+         success += 1
+      except Exception as e:
+         ERRORS.append(e)
+         failed += 1
+  if ERRORS:
+     await message.reply(ERRORS[:100])
+  await sts.edit("completed\n" + TEXT.format(total, success, failed, already))
+  
+async def get_configs(user_id):
+  configs = await db.get_configs(user_id)
+  return configs
+                          
+async def update_configs(user_id, key, value):
+  current = await db.get_configs(user_id)
+  
+  # Expanded valid keys list for Feature support
+  valid_keys = [
+      'caption', 'duplicate', 'db_uri', 'forward_tag', 'protect', 
+      'file_size', 'size_limit', 'extension', 'keywords', 'button',
+      'replace_text', 'remove_text', 'workers', 'thumbnail', 'thumb_toggle'
+  ]
+  
+  if key in valid_keys:
+     current[key] = value
+  else: 
+     current['filters'][key] = value
+  await db.update_configs(user_id, current)
 
 def parse_buttons(text, markup=True):
-    """[Name][buttonurl:link] ko standard Telegram buttons mein convert karta hai."""
     buttons = []
-    if not text: return None
     for match in BTN_URL_REGEX.finditer(text):
-        if bool(match.group(4)) and buttons:
-            buttons[-1].append(InlineKeyboardButton(text=match.group(2), url=match.group(3).replace(" ", "")))
-        else:
-            buttons.append([InlineKeyboardButton(text=match.group(2), url=match.group(3).replace(" ", ""))])
-    
-    if markup and buttons: return InlineKeyboardMarkup(buttons)
+        n_escapes = 0
+        to_check = match.start(1) - 1
+        while to_check > 0 and text[to_check] == "\\":
+            n_escapes += 1
+            to_check -= 1
+
+        if n_escapes % 2 == 0:
+            if bool(match.group(4)) and buttons:
+                buttons[-1].append(InlineKeyboardButton(
+                    text=match.group(2),
+                    url=match.group(3).replace(" ", "")))
+            else:
+                buttons.append([InlineKeyboardButton(
+                    text=match.group(2),
+                    url=match.group(3).replace(" ", ""))])
+    if markup and buttons:
+       buttons = InlineKeyboardMarkup(buttons)
     return buttons if buttons else None
