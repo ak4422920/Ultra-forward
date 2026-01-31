@@ -53,8 +53,9 @@ async def forward(bot, message):
                 return await source_msg.reply("<b>Please Forward a message or send a message Link.</b>")
 
         # Step 2: Select Target Channel
-        sts.add('FROM', chat_id)
-        sts.add('limit', limit)
+        # [FIX] Using .set() instead of .add() to safely initialize data without KeyError
+        sts.set('FROM', chat_id)
+        sts.set('limit', limit)
         
         # Generate Target Channel Buttons
         buttons = []
@@ -89,8 +90,8 @@ async def target_selection(bot, query):
     sts = STS(user_id)
     
     # Store Target (For Bulk, we handle 1 target at a time here)
-    # Note: For Multi-Target Live forwarding, use /live command logic
-    sts.add('TO', target_id)
+    # [FIX] Using .set() here as well
+    sts.set('TO', target_id)
     
     await query.message.delete()
     
