@@ -9,7 +9,6 @@ class STS:
         self.id = id
         self.data = STATUS
     
-    # [FIX] Added this method to safely initialize data without errors
     def set(self, key, value):
         if self.id not in self.data:
             self.data[self.id] = {}
@@ -19,7 +18,6 @@ class STS:
         return self.data.get(self.id)
     
     def store(self, From, to, skip, limit):
-        # Initializes the full task structure
         self.data[self.id] = {
             "FROM": From, 
             'TO': to, 
@@ -47,14 +45,12 @@ class STS:
         return self
 
     def add(self, key=None, value=1, time=False):
-        # [FIX] Safer add logic that creates the user entry if missing
         if self.id not in self.data:
             self.data[self.id] = {}
             
         if time:
           return self.data[self.id].update({'start': tm.time()})
         
-        # [FIX] Safely handle missing keys by defaulting to 0
         current_val = self.get(key)
         if current_val is None:
             current_val = 0
@@ -66,11 +62,15 @@ class STS:
        return int(no) / by 
     
     async def get_data(self, user_id):
+        # [FIX] Load attributes (TO, FROM, etc.) before accessing them
+        self.get(full=True) 
+        
         bot = await db.get_bot(user_id)
         k, filters = self, await db.get_filters(user_id)
         size, configs = None, await db.get_configs(user_id)
         
         if configs['duplicate']:
+           # Now self.TO exists because we called self.get(full=True) above
            duplicate = [configs['db_uri'], self.TO]
         else:
            duplicate = False
