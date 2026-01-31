@@ -1,14 +1,13 @@
 import time as tm
 from database import db 
-from config import Config
+from config import Config, temp
 
-# Global dictionary for session data (Engine Memory)
-STATUS = {}
+# =================== BUTTON PARSER =================== #
 
 def parse_buttons(text):
     """
     Caption mein custom inline buttons add karne ke liye.
-    Format: [Name | Link]
+    Format: [Name | Link] - Comma separated for rows.
     """
     from pyrogram.types import InlineKeyboardButton
     markup = []
@@ -24,19 +23,22 @@ def parse_buttons(text):
     except Exception: pass
     return markup if markup else None
 
+# =================== SESSION TRACKER (STS) =================== #
+
 class STS:
     def __init__(self, id):
-        self.id = id
-        self.data = STATUS
+        self.id = str(id)
+        # Hum config.py ka global storage use karenge
+        self.data = temp.DATA
         
     def verify(self):
-        """Check karta hai ki task memory mein hai ya expired ho gaya."""
+        """Check karta hai ki task memory mein hai ya nahi."""
         return self.id in self.data
     
     def store(self, From, to, skip, total):
         """
         Forwarding setup save karta hai.
-        'to' ab ek multi-target string hai.
+        'to' ab ek multi-target string/list support karta hai.
         """
         self.data[self.id] = {
             "FROM": From, 
@@ -44,10 +46,7 @@ class STS:
             'total_files': 0, 
             'skip': int(skip), 
             'fetched': 0, 
-            'filtered': 0, 
-            'deleted': 0, 
             'duplicate': 0, 
-            'last_id': 0, 
             'total': total,   
             'start': tm.time()
         }
@@ -60,6 +59,7 @@ class STS:
         if not full:
            return values.get(value)
            
+        # Full object return for stats mapping
         class DataObject:
             def __init__(self, d, id):
                 for k, v in d.items():
@@ -67,33 +67,29 @@ class STS:
                 self.id = id
         return DataObject(values, self.id)
 
-    def add(self, key=None, value=1, time=False):
+    def add(self, key=None, value=1):
         """Progress bar aur counters (stats) update karne ke liye."""
-        if self.id not in self.data: return
-        if time:
-            self.data[self.id]['start'] = tm.time()
-            return
-        if key in self.data[self.id]:
+        if self.id in self.data and key in self.data[self.id]:
             self.data[self.id][key] += value
     
     async def get_data(self, user_id):
         """
-        DATABASE + CONFIG + MEMORY ka merger.
-        Engine (regix.py) ko jo bhi asala-barood chahiye, sab yahan se milega.
+        Engine (regix.py) ko jo bhi details chahiye, sab yahan se merge hokar jati hain.
         """
         bot_data = await db.get_bot(user_id)
         configs = await db.get_configs(user_id)
         
-        # Word Replacement logic (Keyword Mapper)
+        # Word Replacement logic
         word_map = configs.get('replace_words', {})
         
         # Custom Buttons logic
         button_text = configs.get('button', '')
         button = parse_buttons(button_text)
         
-        # Target list extraction (From saved targets or manual input)
+        # Target list extraction
         targets = self.get('TO')
         
+        # Ye tuple exactly regix.py ke core_forward_engine se match karta hai
         return (
             bot_data, 
             configs.get('caption'), 
@@ -101,13 +97,9 @@ class STS:
             {
                 'chat_id': self.get('FROM'), 
                 'offset': self.get('skip'), 
-                'filters': configs.get('filters', {}),
-                'keywords': configs.get('keywords', []), 
                 'replace_words': word_map, 
-                'extensions': configs.get('extension', []), 
-                'skip_duplicate': configs.get('duplicate'),
                 'thumbnail': configs.get('thumbnail'),
-                'targets': targets # [NEW] Integrated for engine routing
+                'targets': targets 
             }, 
             configs.get('protect'), 
             button
