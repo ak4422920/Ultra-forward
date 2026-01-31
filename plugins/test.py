@@ -24,27 +24,29 @@ BTN_URL_REGEX = re.compile(r"(\[([^\[]+?)]\[buttonurl:/{0,2}(.+?)(:same)?])")
 BOT_TOKEN_TEXT = "<b>1) create a bot using @BotFather\n2) Then you will get a message with bot token\n3) Forward that message to me</b>"
 SESSION_STRING_SIZE = 351
 
+# [FIX] Moved iter_messages to global scope so it can be imported by other files
+async def iter_messages(
+    self, 
+    chat_id: Union[int, str], 
+    limit: int, 
+    offset: int = 0,
+    search: str = None,
+    filter: "types.TypeMessagesFilter" = None,
+) -> Optional[AsyncGenerator["types.Message", None]]:
+    current = offset
+    while True:
+        new_diff = min(200, limit - current)
+        if new_diff <= 0:
+            return
+        messages = await self.get_messages(chat_id, list(range(current, current+new_diff+1)))
+        for message in messages:
+            yield message
+            current += 1
+
 async def start_clone_bot(FwdBot, data=None):
    await FwdBot.start()
    
-   async def iter_messages(
-      self, 
-      chat_id: Union[int, str], 
-      limit: int, 
-      offset: int = 0,
-      search: str = None,
-      filter: "types.TypeMessagesFilter" = None,
-      ) -> Optional[AsyncGenerator["types.Message", None]]:
-        current = offset
-        while True:
-            new_diff = min(200, limit - current)
-            if new_diff <= 0:
-                return
-            messages = await self.get_messages(chat_id, list(range(current, current+new_diff+1)))
-            for message in messages:
-                yield message
-                current += 1
-   
+   # Attach the custom iterator to the instance
    FwdBot.iter_messages = iter_messages.__get__(FwdBot)
    
    # Feature 12: Worker Management (Session storage in memory)
