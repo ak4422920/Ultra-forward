@@ -20,13 +20,9 @@ TEXT = Translation.TEXT
 # ================= AUTO-RESTART ENGINE ================= #
 
 async def auto_restart_task(bot, user_id, task_data):
-    """
-    Bot restart hone par background mein task resume karne ke liye logic.
-    """
     frwd_id = task_data.get('frwd_id') 
     if frwd_id:
         sts = STS(frwd_id)
-        # Memory refresh with DB stored values
         sts.store(
             task_data.get('FROM'), 
             task_data.get('TO'), 
@@ -82,14 +78,12 @@ async def pub_(bot, query):
 
 async def core_forward_engine(bot, user, sts, frwd_id, query=None, is_auto=False):
     temp.CANCEL[user] = False
-    m = None # [FIX] Initialize pehle hi kar diya
+    m = None 
     client = None
     
-    # Anti-Multi Task Check
     if not is_auto and temp.lock.get(user): return
     if not sts.verify(): return
     
-    # Engine Data Fetching
     _bot, caption, forward_tag, data, protect, button = await sts.get_data(user)
     configs = await db.get_configs(user)
     word_map = configs.get('replace_words', {})
@@ -97,35 +91,42 @@ async def core_forward_engine(bot, user, sts, frwd_id, query=None, is_auto=False
     target_list = str(sts.get('TO')).split(",")
 
     try:
-        # UI Message setup
         if not is_auto:
             m = query.message 
         else:
             m = await bot.send_message(user, "<b>♻️ Resuming Interrupted Task...</b>")
 
-        # Worker (Clone Bot) Start
         client = await start_clone_bot(CLIENT_OBJ.client(_bot))
         temp.lock[user] = True
+
+        # ================= [PEER RESOLUTION PATCH] ================= #
+        # ID ko integer mein convert karna aur chats resolve karna
+        source_chat = sts.get('FROM')
+        if str(source_chat).startswith("-100"): source_chat = int(source_chat)
         
-        # Calculate totals
-        total_msgs = await client.get_chat_history_count(sts.get('FROM'))
-        sts.store(sts.get('FROM'), sts.get('TO'), sts.get('skip'), total_msgs)
+        try:
+            await client.get_chat(source_chat) # Resolving Source
+            for t_id in target_list:
+                t_id = t_id.strip()
+                if t_id.startswith("-100"): t_id = int(t_id)
+                await client.get_chat(t_id) # Resolving Targets
+        except Exception as res_err:
+            logger.warning(f"Peer Resolution Warning: {res_err}")
+        # =========================================================== #
         
-        # Persistence: Task ko DB mein save karo
+        total_msgs = await client.get_chat_history_count(source_chat)
+        sts.store(source_chat, sts.get('TO'), sts.get('skip'), total_msgs)
+        
         await db.add_task(user, {
-            'frwd_id': frwd_id, 
-            'status': 'running', 
-            'FROM': sts.get('FROM'), 
-            'TO': sts.get('TO'), 
-            'skip': sts.get('skip')
+            'frwd_id': frwd_id, 'status': 'running', 
+            'FROM': source_chat, 'TO': sts.get('TO'), 'skip': sts.get('skip')
         })
 
         pling = 0
         
-        async for msg in client.get_chat_history(sts.get('FROM'), offset_id=int(sts.get('skip'))):
+        async for msg in client.get_chat_history(source_chat, offset_id=int(sts.get('skip'))):
             if temp.CANCEL.get(user): break
             
-            # Progress update UI
             if pling % 5 == 0: 
                 await edit(m, 'ғᴏʀᴡᴀʀᴅɪɴɢ', 10, sts)
                 await db.update_task_status(user, msg.id)
@@ -133,54 +134,31 @@ async def core_forward_engine(bot, user, sts, frwd_id, query=None, is_auto=False
             pling += 1; sts.add('fetched')
             if msg.empty or msg.service: continue
 
-            # Duplicate Protection
             if msg.media and configs.get('duplicate'):
                 file_id = getattr(getattr(msg, msg.media.value), 'file_unique_id', None)
                 if await db.is_duplicate(user, file_id):
                     sts.add('duplicate'); continue
 
-            # Process Caption & Word Mapping
             new_cap = apply_word_replacement(custom_caption(msg, caption), word_map)
 
-            # --- Target Loop (Multi-Target Handling) ---
             for target in target_list:
                 try:
-                    t_id = int(target.strip())
+                    t_id = target.strip()
+                    if t_id.startswith("-100"): t_id = int(t_id)
                     
-                    # CASE A: Custom Thumbnail Re-upload
                     if thumb_path and msg.media:
                         path = await client.download_media(msg)
-                        sent = await client.send_document(
-                            t_id, document=path, thumb=thumb_path, 
-                            caption=new_cap, protect_content=protect, 
-                            reply_markup=button
-                        )
+                        sent = await client.send_document(t_id, document=path, thumb=thumb_path, caption=new_cap, protect_content=protect, reply_markup=button)
                         if os.path.exists(path): os.remove(path)
-                    
-                    # CASE B: Standard Copy/Forward
                     else:
                         if forward_tag: 
-                            sent = await client.forward_messages(t_id, sts.get('FROM'), [msg.id])
+                            sent = await client.forward_messages(t_id, source_chat, [msg.id])
                         else: 
-                            sent = await client.copy_message(
-                                t_id, sts.get('FROM'), msg.id, 
-                                caption=new_cap, protect_content=protect, 
-                                reply_markup=button
-                            )
-                    
-                    # Optional: Auto Backup
-                    if Config.AUTO_BACKUP_CHANNEL:
-                        backup_msg = sent[0] if isinstance(sent, list) else sent
-                        await backup_msg.copy(Config.AUTO_BACKUP_CHANNEL)
-                        
-                except Exception as e: 
-                    logger.error(f"Target Delivery Error: {e}")
+                            sent = await client.copy_message(t_id, source_chat, msg.id, caption=new_cap, protect_content=protect, reply_markup=button)
+                except Exception as e: logger.error(f"Target Error: {e}")
             
             sts.add('total_files')
-            if msg.media and configs.get('duplicate'): 
-                await db.save_fingerprint(user, file_id)
-            
-            # Anti-Flood Sleep
+            if msg.media and configs.get('duplicate'): await db.save_fingerprint(user, file_id)
             await asyncio.sleep(1.5)
 
     except Exception as e: 
@@ -189,8 +167,7 @@ async def core_forward_engine(bot, user, sts, frwd_id, query=None, is_auto=False
     finally:
         temp.lock[user] = False 
         await db.remove_task(user)
-        if m: # [FIX] Ensure message object exists
-            await edit(m, 'ᴄᴏᴍᴘʟᴇᴛᴇᴅ', "ᴄᴏᴍᴘʟᴇᴛᴇᴅ", sts)
+        if m: await edit(m, 'ᴄᴏᴍᴘʟᴇᴛᴇᴅ', "ᴄᴏᴍᴘʟᴇᴛᴇᴅ", sts)
         if client and client.is_connected: 
             await client.stop()
 
@@ -199,7 +176,6 @@ async def edit(msg, title, status, sts):
     i = sts.get(full=True)
     if not i: return
     
-    # Progress Calculation
     actual = int(i.total) - int(i.skip)
     percentage = "{:.1f}".format(float(i.fetched) * 100 / (actual if actual > 0 else 1))
     filled = math.floor(float(percentage) / 10)
