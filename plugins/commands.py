@@ -1,145 +1,168 @@
 import os
-import sys
-import asyncio 
-import datetime
-import psutil
-from pyrogram.types import Message
-from database import db, mongodb_version
+import random
+import asyncio
+from pyrogram import Client, filters
+from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from pyrogram.errors import UserNotParticipant
 from config import Config, temp
-from platform import python_version
+from database import db
 from translation import Translation
-from pyrogram import Client, filters, enums, __version__ as pyrogram_version
-from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaDocument
 
-# Professional Main Buttons (Elite V3 Branding)
-# Fix: Added a fallback for FORCE_SUB_CHANNEL to prevent crash
-main_buttons = [
-    [InlineKeyboardButton('📖 ʜᴇʟᴘ & ᴄᴏᴍᴍᴀɴᴅs', callback_data='help')],
-    [InlineKeyboardButton('📢 ᴜᴘᴅᴀᴛᴇ ᴄʜᴀɴɴᴇʟ', url=getattr(Config, 'FORCE_SUB_CHANNEL', 'https://t.me/Silicon_Official'))],
-    [InlineKeyboardButton('💳 sᴜᴘᴘᴏʀᴛ & ᴅᴏɴᴀᴛᴇ', callback_data='donate')]
-]
-
-# =================== START FUNCTION (DYNAMIC MULTI-FSub) =================== #
-
-@Client.on_message(filters.private & filters.command(['start']))
-async def start(client, message):
-    user = message.from_user
+# --- MULTI-FORCE SUB LOGIC ---
+async def force_sub(bot, message):
+    if not Config.FORCE_SUB_ON:
+        return True
     
-    # --- [UPGRADED] MULTIPLE FORCE SUBSCRIBE LOGIC ---
-    if Config.FORCE_SUB_ON:
-        not_joined = []
-        # Saari IDs ko list se check karega
-        for channel_id in Config.FORCE_SUB_CHANNELS:
+    user_id = message.from_user.id
+    missing_channels = []
+    
+    # Iterate through all channels in the list
+    for channel_id in Config.FORCE_SUB_CHANNELS:
+        try:
+            # Check if user is a member
+            await bot.get_chat_member(channel_id, user_id)
+        except UserNotParticipant:
+            # Generate Invite Link if missing
             try:
-                member = await client.get_chat_member(channel_id, user.id)
-                if member.status == enums.ChatMemberStatus.BANNED:
-                    return await message.reply_text("<b>❌ Error:</b> Aapko bot se ban kiya gaya hai.")
-            except Exception:
-                # Agar join nahi hai toh list mein daal do
-                not_joined.append(channel_id)
-
-        if not_joined:
-            buttons = []
-            for ch_id in not_joined:
-                try:
-                    # Har ID ka asli naam aur link bot khud nikalega
-                    chat = await client.get_chat(ch_id)
-                    # Link check: Username hai toh wo, warna Invite Link generate karega
-                    link = f"https://t.me/{chat.username}" if chat.username else await client.export_chat_invite_link(ch_id)
-                    buttons.append([InlineKeyboardButton(f"ᴊᴏɪɴ {chat.title} 📡", url=link)])
-                except Exception as e:
-                    print(f"FSub Link Fetch Error: {e}")
-                    continue
+                chat = await bot.get_chat(channel_id)
+                link = chat.invite_link
+                if not link:
+                    link = await bot.export_chat_invite_link(channel_id)
+                missing_channels.append((chat.title, link))
+            except Exception as e:
+                # Skip invalid channels to prevent blocking the user
+                print(f"Force Sub Error for {channel_id}: {e}")
+                continue
+        except Exception:
+            continue
             
-            buttons.append([InlineKeyboardButton("↻ ᴛʀʏ ᴀɢᴀɪɴ", url=f"https://t.me/{client.username}?start=start")])
-            return await message.reply_text(
-                text="<b>⚠️ Access Denied!</b>\n\nAapne hamare mandatory channels join nahi kiye hain. Niche diye gaye buttons se join karein aur 'Try Again' par click karein.",
-                reply_markup=InlineKeyboardMarkup(buttons)
-            )
-
-    # User registration in Database
-    if not await db.is_user_exist(user.id):
-        await db.add_user(user.id, user.first_name)
-        await client.send_message(
-            chat_id=Config.LOG_CHANNEL,
-            text=f"<b>#NewUser</b>\n\n<b>ID:</b> <code>{user.id}</code>\n<b>Name:</b> {user.mention}"
-        )
+    if not missing_channels:
+        return True
     
+    # Create Buttons for all missing channels
+    buttons = []
+    for title, link in missing_channels:
+        buttons.append([InlineKeyboardButton(text=f"Join {title}", url=link)])
+    
+    # Try Again Button
+    try:
+        # Pass start args back if they exist
+        start_arg = message.command[1] if len(message.command) > 1 else ""
+        url = f"https://t.me/{bot.me.username}?start={start_arg}"
+    except:
+        url = f"https://t.me/{bot.me.username}?start"
+        
+    buttons.append([InlineKeyboardButton("🔄 Try Again", url=url)])
+
     await message.reply_text(
-        text=Translation.START_TXT.format(user.first_name),
-        reply_markup=InlineKeyboardMarkup(main_buttons)
+        "<b>⚠️ Access Denied!</b>\n\n<b>Please join our updates channels to use this bot.</b>",
+        reply_markup=InlineKeyboardMarkup(buttons)
+    )
+    return False
+
+# --- COMMAND HANDLERS ---
+
+@Client.on_message(filters.private & filters.command(["start"]))
+async def start(bot, message):
+    if not await force_sub(bot, message):
+        return
+        
+    user_id = message.from_user.id
+    if not await db.is_user_exist(user_id):
+        await db.add_user(user_id, message.from_user.first_name)
+        
+    txt = Translation.START_TXT.format(message.from_user.first_name)
+    buttons = [
+        [InlineKeyboardButton('• ʜᴇʟᴘ •', callback_data='help'),
+         InlineKeyboardButton('• ᴀʙᴏᴜᴛ •', callback_data='about')],
+        [InlineKeyboardButton('• sᴇᴛᴛɪɴɢs •', callback_data='settings#main')],
+        [InlineKeyboardButton('• ᴅᴏɴᴀᴛᴇ •', callback_data='donate')]
+    ]
+    await message.reply_text(text=txt, reply_markup=InlineKeyboardMarkup(buttons))
+
+@Client.on_message(filters.private & filters.command(["live"]))
+async def live_command(bot, message):
+    if not await force_sub(bot, message):
+        return
+        
+    # Redirect to the Live Settings Menu
+    buttons = [[InlineKeyboardButton('⚙️ Setup Live Forwarding', callback_data='settings#live')]]
+    await message.reply_text(
+        "<b><u>📡 Live Auto-Forwarding</u></b>\n\nThis feature allows you to forward messages in real-time from a source channel to multiple destination channels.\n\nClick below to configure your tasks.",
+        reply_markup=InlineKeyboardMarkup(buttons)
     )
 
-# ================== RESTART (ADMIN ONLY) ================== #
+@Client.on_message(filters.private & filters.command(["help"]))
+async def help_command(bot, message):
+    if not await force_sub(bot, message):
+        return
+    await message.reply_text(
+        text=Translation.HELP_TXT,
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton('• ʜᴏᴡ ᴛᴏ ᴜsᴇ •', callback_data='how_to_use')],
+            [InlineKeyboardButton('• ʙᴀᴄᴋ •', callback_data='start')]
+        ])
+    )
 
-@Client.on_message(filters.private & filters.command(['restart']) & filters.user(Config.BOT_OWNER_ID))
-async def restart(client, message):
-    msg = await message.reply_text("<b>⚙️ sᴇʀᴠᴇʀ sᴛᴀᴛᴜs:</b> <i>Restarting...</i>")
-    await asyncio.sleep(2)
-    await msg.edit("<b>✅ sᴇʀᴠᴇʀ ʀᴇsᴛᴀʀᴛᴇᴅ sᴜᴄᴄᴇssғᴜʟʟʏ!</b>\nAuto-Resume engine active ho raha hai...")
-    os.execl(sys.executable, sys.executable, *sys.argv)
+@Client.on_message(filters.private & filters.command(["donate"]))
+async def donate_command(bot, message):
+    await message.reply_text(
+        text=Translation.DONATE_TXT,
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('• ʙᴀᴄᴋ •', callback_data='start')]])
+    )
 
-# ================== CALLBACK ACTIONS ================== #
+@Client.on_message(filters.private & filters.command(["status"]) & filters.user(Config.BOT_OWNER_ID))
+async def status_command(bot, message):
+    users, bots = await db.total_users_bots_count()
+    # Count active tasks (approximate via locks)
+    active = len([k for k, v in temp.lock.items() if v])
+    # Count live tasks in DB
+    live = await db.live.count_documents({})
+    
+    await message.reply_text(
+        text=Translation.STATUS_TXT.format(users, bots, active, live)
+    )
 
-@Client.on_callback_query(filters.regex(r'^help'))
-async def helpcb(bot, query):
+# --- CALLBACK HANDLERS ---
+
+@Client.on_callback_query(filters.regex('^help$'))
+async def help_cb(bot, query):
     await query.message.edit_text(
         text=Translation.HELP_TXT,
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton('❓ ʜᴏᴡ ᴛᴏ ᴜsᴇ', callback_data='how_to_use')],
-            [InlineKeyboardButton('⚙️ sᴇᴛᴛɪɴɢs', callback_data='settings#main'), InlineKeyboardButton('📊 sᴛᴀᴛᴜs', callback_data='status')],
-            [InlineKeyboardButton('• ʙᴀᴄᴋ', callback_data='back'), InlineKeyboardButton('• ᴀʙᴏᴜᴛ', callback_data='about')]
+            [InlineKeyboardButton('• ʜᴏᴡ ᴛᴏ ᴜsᴇ •', callback_data='how_to_use')],
+            [InlineKeyboardButton('• ʙᴀᴄᴋ •', callback_data='start')]
         ])
     )
 
-@Client.on_callback_query(filters.regex(r'^back'))
-async def back(bot, query):
+@Client.on_callback_query(filters.regex('^how_to_use$'))
+async def how_to_use_cb(bot, query):
     await query.message.edit_text(
-       text=Translation.START_TXT.format(query.from_user.first_name),
-       reply_markup=InlineKeyboardMarkup(main_buttons)
+        text=Translation.HOW_USE_TXT,
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('• ʙᴀᴄᴋ •', callback_data='help')]])
     )
 
-@Client.on_callback_query(filters.regex(r'^status'))
-async def status(bot, query):
-    users_count, bots_count = await db.total_users_bots_count()
-    active_tasks = len(temp.lock)
-    
+@Client.on_callback_query(filters.regex('^about$'))
+async def about_cb(bot, query):
     await query.message.edit_text(
-        text=Translation.STATUS_TXT.format(users_count, bots_count, active_tasks),
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton('• ʙᴀᴄᴋ', callback_data='help'), InlineKeyboardButton('🖥️ sᴇʀᴠᴇʀ sᴛᴀᴛs', callback_data='server_status')]
-        ])
+        text=Translation.ABOUT_TXT,
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('• ʙᴀᴄᴋ •', callback_data='start')]])
     )
 
-@Client.on_callback_query(filters.regex(r'^server_status'))
-async def server_status(bot, query):
-    ram = psutil.virtual_memory().percent
-    cpu = psutil.cpu_percent()
-    uptime = str(datetime.datetime.now() - datetime.datetime.fromtimestamp(psutil.boot_time())).split('.')[0]
-    
-    text = (
-        "<b>🖥️ sᴇʀᴠᴇʀ ɪɴꜰᴏʀᴍᴀᴛɪᴏɴ</b>\n\n"
-        f"<b>• CPU Usage:</b> <code>{cpu}%</code>\n"
-        f"<b>• RAM Usage:</b> <code>{ram}%</code>\n"
-        f"<b>• Uptime:</b> <code>{uptime}</code>\n"
-        f"<b>• Status:</b> <code>VPS Ready 🚀</code>"
-    )
-    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('• ʙᴀᴄᴋ', callback_data='status')]]))
-
-@Client.on_callback_query(filters.regex(r'^donate'))
+@Client.on_callback_query(filters.regex('^donate$'))
 async def donate_cb(bot, query):
-    text = (
-        "<b>💳 sᴜᴘᴘᴏʀᴛ & ᴅᴏɴᴀᴛᴇ</b>\n\n"
-        "Aapka support humein bot ko bade <b>VPS Servers</b> par host karne mein madad karta hai.\n\n"
-        "🌟 <b>Donators ke liye special benefits:</b>\n"
-        "• Thumbnail ke sath Unlimited Forwarding.\n"
-        "• Faster processing speed.\n\n"
-        "Contact Admin: @AK_ownerbot"
+    await query.message.edit_text(
+        text=Translation.DONATE_TXT,
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('• ʙᴀᴄᴋ •', callback_data='start')]])
     )
-    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('• ʙᴀᴄᴋ', callback_data='back')]]))
 
-# =================== DONATE COMMAND =================== #
-
-@Client.on_message(filters.private & filters.command(['donate']))
-async def donate_cmd(client, message):
-    await message.reply_text("<b>💖 Support Admin:</b> @AK_ownerbot\nDonate karke humein bot ko better banane mein madad karein!")
+@Client.on_callback_query(filters.regex('^start$'))
+async def start_cb(bot, query):
+    txt = Translation.START_TXT.format(query.from_user.first_name)
+    buttons = [
+        [InlineKeyboardButton('• ʜᴇʟᴘ •', callback_data='help'),
+         InlineKeyboardButton('• ᴀʙᴏᴜᴛ •', callback_data='about')],
+        [InlineKeyboardButton('• sᴇᴛᴛɪɴɢs •', callback_data='settings#main')],
+        [InlineKeyboardButton('• ᴅᴏɴᴀᴛᴇ •', callback_data='donate')]
+    ]
+    await query.message.edit_text(text=txt, reply_markup=InlineKeyboardMarkup(buttons))
