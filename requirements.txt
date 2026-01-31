@@ -1,25 +1,16 @@
-# --- Core Library (Pyrogram Fork) ---
 pyrofork==2.3.45
-pyromod           # Very Important for bot.ask logic
-
-# --- Database & Performance ---
-motor             # Async MongoDB
-pymongo           # Sync MongoDB (for initial version check)
-TgCrypto          # Boosts encryption speed (Fast Forwarding)
-dnspython         # Required for MongoDB SRV connections
-
-# --- Media & Thumbnails ---
-hachoir           # Necessary for media metadata (Vital for custom thumbnails)
-Pillow            # Image processing for thumbnails
-
-# --- Monitoring & Time ---
-pytz              # Timezone handling for ETA and Stats
-psutil            # Monitor CPU/RAM usage on VPS
-
-# --- Web Server (Keep-Alive) ---
+pyromod
+motor
+pymongo
+TgCrypto
+dnspython
+hachoir
+Pillow
+pytz
+psutil
 flask
 gunicorn
-aiohttp           # Async requests
+aiohttp
 Jinja2
 werkzeug
 itsdangerous
