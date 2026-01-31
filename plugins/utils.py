@@ -23,12 +23,41 @@ def parse_buttons(text):
     except Exception: pass
     return markup if markup else None
 
+# =================== LIVE & BULK HELPERS =================== #
+
+def apply_replacements(text, word_map):
+    """Word replacement logic jo Live aur Bulk dono mein kaam aayegi."""
+    if not text or not word_map:
+        return text
+    for old_word, new_word in word_map.items():
+        # Case insensitive replacement ke liye regex bhi use kar sakte hain
+        text = text.replace(old_word, new_word)
+    return text
+
+def format_caption(msg, template, word_map):
+    """File details ke sath caption format karne ke liye."""
+    original_caption = msg.caption if msg.caption else ""
+    
+    # 1. Pehle word replacement apply karein
+    processed_caption = apply_replacements(original_caption, word_map)
+    
+    # 2. Agar template (custom caption) hai toh placeholder replace karein
+    if template:
+        file_obj = msg.document or msg.video or msg.audio or msg.animation
+        file_name = getattr(file_obj, 'file_name', 'No Name')
+        final_caption = template.format(
+            filename=file_name,
+            caption=processed_caption
+        )
+        return final_caption
+    
+    return processed_caption
+
 # =================== SESSION TRACKER (STS) =================== #
 
 class STS:
     def __init__(self, id):
         self.id = str(id)
-        # Hum config.py ka global storage use karenge
         self.data = temp.DATA
         
     def verify(self):
@@ -36,10 +65,7 @@ class STS:
         return self.id in self.data
     
     def store(self, From, to, skip, total):
-        """
-        Forwarding setup save karta hai.
-        'to' ab ek multi-target string/list support karta hai.
-        """
+        """Forwarding setup save karta hai."""
         self.data[self.id] = {
             "FROM": From, 
             'TO': to, 
@@ -53,13 +79,12 @@ class STS:
         return self
         
     def get(self, value=None, full=False):
-        """Task memory se specifically data nikalne ke liye."""
+        """Task memory se data nikalne ke liye."""
         values = self.data.get(self.id)
         if not values: return None
         if not full:
            return values.get(value)
            
-        # Full object return for stats mapping
         class DataObject:
             def __init__(self, d, id):
                 for k, v in d.items():
@@ -68,28 +93,20 @@ class STS:
         return DataObject(values, self.id)
 
     def add(self, key=None, value=1):
-        """Progress bar aur counters (stats) update karne ke liye."""
+        """Progress bar update karne ke liye."""
         if self.id in self.data and key in self.data[self.id]:
             self.data[self.id][key] += value
     
     async def get_data(self, user_id):
-        """
-        Engine (regix.py) ko jo bhi details chahiye, sab yahan se merge hokar jati hain.
-        """
+        """Engine (regix.py) ke liye full data fetcher."""
         bot_data = await db.get_bot(user_id)
         configs = await db.get_configs(user_id)
         
-        # Word Replacement logic
         word_map = configs.get('replace_words', {})
-        
-        # Custom Buttons logic
         button_text = configs.get('button', '')
         button = parse_buttons(button_text)
-        
-        # Target list extraction
         targets = self.get('TO')
         
-        # Ye tuple exactly regix.py ke core_forward_engine se match karta hai
         return (
             bot_data, 
             configs.get('caption'), 
