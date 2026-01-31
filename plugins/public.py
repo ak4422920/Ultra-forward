@@ -7,6 +7,22 @@ from translation import Translation
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
 
+# =================== HELPERS =================== #
+
+def extract_id(text):
+    if not text: return None
+    # Regex to handle links and raw IDs
+    regex = re.compile(r"(https://)?(t\.me/|telegram\.me/|telegram\.dog/)(c/)?(\d+|[a-zA-Z_0-9]+)/(\d+)$")
+    match = regex.match(text.replace("?single", ""))
+    if match:
+        chat_id = match.group(4)
+        if chat_id.isnumeric(): return int(("-100" + chat_id))
+        return chat_id
+    # Raw ID check
+    if text.startswith("-100") or text.isdigit():
+        return text.replace(" ", "")
+    return None
+
 # =================== FORWARD SETUP COMMAND =================== #
 
 @Client.on_message(filters.private & filters.command(["forward", "fwd"]))
@@ -16,65 +32,78 @@ async def run(bot, message):
     # 1. 🤖 Worker Check
     _bot = await db.get_bot(user_id)
     if not _bot:
-      return await message.reply("<b>❌ Error:</b>\nAapne koi Worker add nahi kiya hai. Pehle /settings mein jayein.")
+        return await message.reply("<b>❌ Error:</b>\nAapne koi Worker add nahi kiya hai. Pehle /settings mein jayein.")
     
     # 2. 🔒 Lock Check
     if temp.lock.get(user_id):
         return await message.reply("<b>❌ Error:</b> Ek task pehle se chal raha hai.")
 
     # 3. 📤 Source Selection
-    from_input = await bot.ask(message.chat.id, Translation.FROM_MSG)
+    from_input = await bot.ask(user_id, Translation.FROM_MSG)
     if from_input.text and from_input.text.startswith('/'):
         return await message.reply(Translation.CANCEL)
     
     chat_id = None
-    if from_input.text:
-        # Improved Regex for all types of links
-        regex = re.compile(r"(https://)?(t\.me/|telegram\.me/|telegram\.dog/)(c/)?(\d+|[a-zA-Z_0-9]+)/(\d+)$")
-        match = regex.match(from_input.text.replace("?single", ""))
-        if match:
-            chat_id = match.group(4)
-            if chat_id.isnumeric(): chat_id = int(("-100" + chat_id))
-        else:
-            return await message.reply('<b>❌ Invalid Link!</b> Sahi message link bhejein.')
-    elif from_input.forward_from_chat:
+    if from_input.forward_from_chat:
         chat_id = from_input.forward_from_chat.id
+    else:
+        chat_id = extract_id(from_input.text)
     
     if not chat_id:
-        return await message.reply("<b>❌ Error:</b> Source channel ki pehchan nahi ho saki.")
+        return await message.reply("<b>❌ Invalid Source!</b> Link ya ID sahi nahi hai.")
 
-    # 4. 📥 Target Selection (Saved Targets Integration)
+    # 4. 📥 Target Selection
     configs = await db.get_configs(user_id)
     saved_targets = configs.get('targets')
     
-    t_btn = None
-    t_text = Translation.TO_MSG
-    
+    t_btn = []
     if saved_targets:
-        t_text += f"\n\n<b>🎯 Saved Targets:</b>\n<code>{saved_targets}</code>\n\nNiche button dabiye ya naya ID bhejein."
-        t_btn = InlineKeyboardMarkup([[InlineKeyboardButton("🎯 Use Saved Targets", callback_data="use_saved_targets")]])
+        # Button logic: Hum callback mein source_id aur saved_targets dono pass karenge
+        t_btn.append([InlineKeyboardButton("🎯 Use Saved Targets", callback_data=f"set_trg_saved_{chat_id}")])
+    t_btn.append([InlineKeyboardButton("❌ Cancel Setup", callback_data="close_btn")])
     
-    to_input = await bot.ask(message.chat.id, t_text, reply_markup=t_btn)
+    target_prompt = await bot.send_message(
+        user_id, 
+        Translation.TO_MSG + (f"\n\n<b>Saved:</b> <code>{saved_targets}</code>" if saved_targets else ""),
+        reply_markup=InlineKeyboardMarkup(t_btn)
+    )
+
+    # User ke response ka wait: Ya toh wo ID type karega ya button dabayega
+    # Agar button dabaya toh handle_target (niche wala) function kaam sambhaal lega
+    to_input = await bot.listen(user_id)
     
-    if to_input.text and to_input.text.startswith('/'):
-        return await message.reply(Translation.CANCEL)
+    if to_input.text:
+        if to_input.text.startswith('/'): return
+        target_ids = to_input.text.replace(" ", "")
+        await skip_step(bot, user_id, chat_id, target_ids)
 
-    # Logic: Agar button dabaya toh to_input.text khali hoga
-    target_ids = saved_targets if not to_input.text else to_input.text.replace(" ", "")
+# =================== CALLBACK & STEPS =================== #
 
+@Client.on_callback_query(filters.regex(r'^set_trg_saved_'))
+async def handle_saved_target(bot, query):
+    user_id = query.from_user.id
+    source_id = query.data.split("_")[3]
+    
+    configs = await db.get_configs(user_id)
+    target_ids = configs.get('targets')
+    
+    await query.message.delete()
+    await skip_step(bot, user_id, source_id, target_ids)
+
+async def skip_step(bot, user_id, source_id, target_ids):
     # 5. ⏩ Skip Messages
-    skip_input = await bot.ask(message.chat.id, Translation.SKIP_MSG)
-    if skip_input.text and skip_input.text.startswith('/'):
-        return await message.reply(Translation.CANCEL)
+    skip_msg = await bot.ask(user_id, Translation.SKIP_MSG)
+    if skip_msg.text and skip_msg.text.startswith('/'): return
     
-    skip_val = int(skip_input.text) if skip_input.text.isdigit() else 0
+    skip_val = int(skip_msg.text) if skip_msg.text.isdigit() else 0
 
     # 6. 📋 Confirmation UI
-    forward_id = f"{user_id}_{int(asyncio.get_event_loop().time())}"
+    # STS store karne ke liye hum user_id ko hi forward_id banayenge (Simple & Clean)
+    forward_id = str(user_id)
     
     confirm_text = (
         "<b>📋 ꜰᴏʀᴡᴀʀᴅɪɴɢ sᴇᴛᴜᴘ ʀᴇᴀᴅʏ</b>\n\n"
-        f"<b>📤 Source:</b> <code>{chat_id}</code>\n"
+        f"<b>📤 Source:</b> <code>{source_id}</code>\n"
         f"<b>📥 Targets:</b> <code>{target_ids}</code>\n"
         f"<b>⏩ Skip:</b> <code>{skip_val}</code>\n\n"
         "<i>Ready to launch?</i>"
@@ -85,19 +114,11 @@ async def run(bot, message):
         InlineKeyboardButton('❌ Cancel', callback_data="close_btn")
     ]]
 
-    await message.reply_text(text=confirm_text, reply_markup=InlineKeyboardMarkup(buttons))
+    # Store in memory BEFORE showing start button
+    STS(forward_id).store(source_id, target_ids, skip_val, 0)
     
-    # Store in memory
-    STS(forward_id).store(chat_id, target_ids, skip_val, 0)
-
-# =================== CALLBACK HANDLERS =================== #
+    await bot.send_message(user_id, text=confirm_text, reply_markup=InlineKeyboardMarkup(buttons))
 
 @Client.on_callback_query(filters.regex(r'^close_btn'))
 async def close_callback(bot, query):
     await query.message.delete()
-
-@Client.on_callback_query(filters.regex(r'^use_saved_targets'))
-async def use_saved_callback(bot, query):
-    # Answer query and edit message to remove buttons so 'ask' continues
-    await query.answer("✅ Saved Targets Selected!", show_alert=False)
-    await query.message.edit_text("<b>🎯 Saved Targets Selected!</b>\nAb agla step follow karein...")
