@@ -1,123 +1,81 @@
 import time as tm
 from database import db 
-from config import Config, temp
+from .test import parse_buttons
 
-# =================== BUTTON PARSER =================== #
-
-def parse_buttons(text):
-    """
-    Caption mein custom inline buttons add karne ke liye.
-    Format: [Name | Link] - Comma separated for rows.
-    """
-    from pyrogram.types import InlineKeyboardButton
-    markup = []
-    if not text: return None
-    try:
-        for line in text.split('\n'):
-            row = []
-            for btn in line.split(','):
-                if '|' in btn:
-                    name, url = btn.split('|')
-                    row.append(InlineKeyboardButton(name.strip(), url=url.strip()))
-            if row: markup.append(row)
-    except Exception: pass
-    return markup if markup else None
-
-# =================== LIVE & BULK HELPERS =================== #
-
-def apply_replacements(text, word_map):
-    """Word replacement logic jo Live aur Bulk dono mein kaam aayegi."""
-    if not text or not word_map:
-        return text
-    for old_word, new_word in word_map.items():
-        # Case insensitive replacement ke liye regex bhi use kar sakte hain
-        text = text.replace(old_word, new_word)
-    return text
-
-def format_caption(msg, template, word_map):
-    """File details ke sath caption format karne ke liye."""
-    original_caption = msg.caption if msg.caption else ""
-    
-    # 1. Pehle word replacement apply karein
-    processed_caption = apply_replacements(original_caption, word_map)
-    
-    # 2. Agar template (custom caption) hai toh placeholder replace karein
-    if template:
-        file_obj = msg.document or msg.video or msg.audio or msg.animation
-        file_name = getattr(file_obj, 'file_name', 'No Name')
-        final_caption = template.format(
-            filename=file_name,
-            caption=processed_caption
-        )
-        return final_caption
-    
-    return processed_caption
-
-# =================== SESSION TRACKER (STS) =================== #
+STATUS = {}
 
 class STS:
     def __init__(self, id):
-        self.id = str(id)
-        self.data = temp.DATA
+        self.id = id
+        self.data = STATUS
         
     def verify(self):
-        """Check karta hai ki task memory mein hai ya nahi."""
-        return self.id in self.data
+        return self.data.get(self.id)
     
-    def store(self, From, to, skip, total):
-        """Forwarding setup save karta hai."""
+    def store(self, From, to, skip, limit):
+        # Feature 2: Support for Multi-Target logic
         self.data[self.id] = {
             "FROM": From, 
             'TO': to, 
             'total_files': 0, 
-            'skip': int(skip), 
-            'fetched': 0, 
+            'skip': skip, 
+            'limit': limit,
+            'fetched': skip, 
+            'filtered': 0, 
+            'deleted': 0, 
             'duplicate': 0, 
-            'total': total,   
-            'start': tm.time()
+            'total': limit, 
+            'start': 0
         }
-        return self
+        self.get(full=True)
+        return STS(self.id)
         
     def get(self, value=None, full=False):
-        """Task memory se data nikalne ke liye."""
         values = self.data.get(self.id)
-        if not values: return None
         if not full:
            return values.get(value)
-           
-        class DataObject:
-            def __init__(self, d, id):
-                for k, v in d.items():
-                    setattr(self, k, v)
-                self.id = id
-        return DataObject(values, self.id)
+        for k, v in values.items():
+            setattr(self, k, v)
+        return self
 
-    def add(self, key=None, value=1):
-        """Progress bar update karne ke liye."""
-        if self.id in self.data and key in self.data[self.id]:
-            self.data[self.id][key] += value
+    def add(self, key=None, value=1, time=False):
+        if time:
+          return self.data[self.id].update({'start': tm.time()})
+        self.data[self.id].update({key: self.get(key) + value}) 
+    
+    def divide(self, no, by):
+       by = 1 if int(by) == 0 else by 
+       return int(no) / by 
     
     async def get_data(self, user_id):
-        """Engine (regix.py) ke liye full data fetcher."""
-        bot_data = await db.get_bot(user_id)
-        configs = await db.get_configs(user_id)
+        bot = await db.get_bot(user_id)
+        k, filters = self, await db.get_filters(user_id)
+        size, configs = None, await db.get_configs(user_id)
         
-        word_map = configs.get('replace_words', {})
-        button_text = configs.get('button', '')
-        button = parse_buttons(button_text)
-        targets = self.get('TO')
-        
-        return (
-            bot_data, 
-            configs.get('caption'), 
-            configs.get('forward_tag'), 
-            {
-                'chat_id': self.get('FROM'), 
-                'offset': self.get('skip'), 
-                'replace_words': word_map, 
-                'thumbnail': configs.get('thumbnail'),
-                'targets': targets 
-            }, 
-            configs.get('protect'), 
-            button
-        )
+        if configs['duplicate']:
+           duplicate = [configs['db_uri'], self.TO]
+        else:
+           duplicate = False
+           
+        button = parse_buttons(configs['button'] if configs['button'] else '')
+        if configs['file_size'] != 0:
+            size = [configs['file_size'], configs['size_limit']]
+            
+        # Returning extended configuration for all new features
+        return bot, configs['caption'], configs['forward_tag'], {
+            'chat_id': k.FROM, 
+            'limit': k.limit, 
+            'offset': k.skip, 
+            'filters': filters,
+            'keywords': configs['keywords'], 
+            'button': button, 
+            'duplicate': duplicate, 
+            'protect': configs['protect'], 
+            'extension': configs['extension'], 
+            'size': size,
+            'replace_text': configs.get('replace_text'), # Feature 5: Word Replace
+            'remove_text': configs.get('remove_text'),   # Feature 6: Word Remover
+            'thumbnail': configs.get('thumbnail'),       # Custom Thumbnail ID
+            'thumb_toggle': configs.get('thumb_toggle'), # Thumbnail Switch
+            'workers': configs.get('workers', 1)         # Feature 12: Workers count
+        }
