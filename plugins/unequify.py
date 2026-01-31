@@ -15,7 +15,6 @@ logger = logging.getLogger(__name__)
 # UI Buttons (Branding & Crash-Proof)
 def get_btns(is_completed=False):
     if is_completed:
-        # Crash guard for singular/plural config issue
         fsub_link = getattr(Config, 'FORCE_SUB_CHANNEL', 'https://t.me/Silicon_Official')
         return InlineKeyboardMarkup([[InlineKeyboardButton('💠 ᴜᴘᴅᴀᴛᴇ ᴄʜᴀɴɴᴇʟ', url=fsub_link)]])
     return InlineKeyboardMarkup([[InlineKeyboardButton('• ᴄᴀɴᴄᴇʟ', callback_data='terminate_frwd')]])
@@ -25,92 +24,88 @@ async def unequify_handler(bot, message):
     user_id = message.from_user.id
     temp.CANCEL[user_id] = False
     
-    # 1. 🔒 Lock Check
+    # 1. 🔒 Lock Check (Multi-tasking preventer)
     if temp.lock.get(user_id):
-        return await message.reply("<b>❌ Error:</b> Pehle se ek task chal raha hai. Use khatam hone dein.")
+        return await message.reply("<b>❌ Error:</b> Pehle se ek task chal raha hai.")
     
-    # 2. 🤖 Userbot Requirement (Crucial for History Scanning)
+    # 2. 🤖 Worker Check (Bot Token won't work for History Scan)
     _bot = await db.get_bot(user_id)
-    if not _bot or _bot.get('is_bot'):
-        return await message.reply("<b>⚠️ Userbot Zaroori Hai!</b>\n\nChannel history scan karne ke liye aapko /settings mein ja kar ek Userbot (Session) add karna hoga. Normal Bot history scan nahi kar sakta.")
-    
+    if not _bot:
+        return await message.reply("<b>⚠️ Worker Missing!</b>\n\nHistory scan karne ke liye ek Worker (Session String) zaroori hai.")
+
     # 3. 📑 Input Parsing
     target = await bot.ask(user_id, text="<b>❪ ᴜɴᴇǫᴜɪғʏ sᴇᴛᴜᴘ ❫</b>\n\nJis channel se duplicates saaf karne hain, uska link bhejein ya wahan se ek message forward karein.\n\n/cancel - Task rokne ke liye.")
-    if target.text and target.text.startswith("/"): return await message.reply("❌ **Process Cancelled!**")
+    if not target.text or target.text.startswith("/"): 
+        return await message.reply("❌ **Process Cancelled!**")
     
+    # Chat ID Extraction Logic
     chat_id = None
-    if target.text:
-        regex = re.compile(r"(https://)?(t\.me/|telegram\.me/|telegram\.dog/)(c/)?(\d+|[a-zA-Z_0-9]+)/(\d+)$")
-        match = regex.match(target.text.replace("?single", ""))
-        if match:
-            chat_id = match.group(4)
-            if chat_id.isnumeric(): chat_id = int(("-100" + chat_id))
-        else:
-            try:
-                # Username handle karne ke liye
-                chat = await bot.get_chat(target.text.split('/')[-1])
-                chat_id = chat.id
-            except: return await message.reply("<b>❌ Invalid Link!</b>")
-    elif target.forward_from_chat:
+    if target.forward_from_chat:
         chat_id = target.forward_from_chat.id
-    
-    if not chat_id: return await message.reply("<b>❌ Invalid Input!</b> Sahi channel link ya message bhejein.")
+    else:
+        try:
+            input_data = target.text.split('/')[-1]
+            chat = await bot.get_chat(input_data)
+            chat_id = chat.id
+        except: 
+            return await message.reply("<b>❌ Invalid Link!</b> Sahi channel link bhejein.")
 
     # 4. ✅ Confirmation Prompt
-    confirm = await bot.ask(user_id, text=f"<b>Target Chat:</b> <code>{chat_id}</code>\n\nKya aap pakka is channel se saare duplicates delete karna chahte hain?\n\n<b>Note:</b> Ye process media files ke unique ID check karega.\n\n<b>Reply:</b> /yes ya /no")
-    if not confirm.text or confirm.text.lower() != '/yes': return await confirm.reply("❌ **Cleaning Aborted.**")
+    confirm = await bot.ask(user_id, text=f"<b>Target Chat:</b> <code>{chat_id}</code>\n\nKya aap pakka is channel se saare duplicates delete karna chahte hain?\n\n<b>Reply:</b> /yes ya /no")
+    if not confirm.text or confirm.text.lower() != '/yes': 
+        return await confirm.reply("❌ **Cleaning Aborted.**")
     
-    sts_msg = await confirm.reply("<b>⚙️ Initializing Userbot...</b>\n<i>Scanning power activate ho rahi hai.</i>")
+    sts_msg = await confirm.reply("<b>⚙️ Initializing Engine...</b>\n<i>Scanning power activate ho rahi hai.</i>")
     
     # 5. 🚀 The Cleaning Engine
     u_bot = None
     try:
+        # Worker start karna
         u_bot = await start_clone_bot(CLIENT_OBJ.client(_bot))
         temp.lock[user_id] = True
         
-        MESSAGES_SET = set() # Unique Digital Fingerprints
+        MESSAGES_SET = set() # Unique Digital Fingerprints store karega
         DUPLICATE_IDS = []
         total, deleted = 0, 0
 
-        # Logic: Scanned message -> Extract File ID -> Compare with Set -> Delete if duplicate
-        
-
+        # 
         async for msg in u_bot.get_chat_history(chat_id):
             if temp.CANCEL.get(user_id): break
             
             total += 1
             if msg.media:
-                # File unique ID check (Most accurate way)
-                f_id = getattr(getattr(msg, msg.media.value, None), 'file_unique_id', None)
+                # File unique ID check (Sabse accurate method)
+                media_type = msg.media.value
+                f_id = getattr(getattr(msg, media_type, None), 'file_unique_id', None)
+                
                 if f_id:
                     if f_id in MESSAGES_SET:
                         DUPLICATE_IDS.append(msg.id)
                     else:
                         MESSAGES_SET.add(f_id)
             
-            # Batch Progress Update
+            # Progress Update (Every 100 messages)
             if total % 100 == 0:
                 try:
                     await sts_msg.edit(
                         f"<b>🔍 Scanning History...</b>\n\n"
                         f"• Scanned: <code>{total}</code>\n"
-                        f"• Duplicates Found: <code>{len(DUPLICATE_IDS) + deleted}</code>\n\n"
-                        f"<i>Bot is scanning backwards to find clones.</i>", 
+                        f"• Duplicates Found: <code>{len(DUPLICATE_IDS) + deleted}</code>", 
                         reply_markup=get_btns()
                     )
                 except: pass
             
-            # Batch Deletion (Flood protection batches of 50)
-            if len(DUPLICATE_IDS) >= 50:
+            # Batch Deletion (Flood protection: 100 ka batch)
+            if len(DUPLICATE_IDS) >= 100:
                 try:
                     await u_bot.delete_messages(chat_id, DUPLICATE_IDS)
                     deleted += len(DUPLICATE_IDS)
                     DUPLICATE_IDS = []
-                    await asyncio.sleep(1.5) # Anti-Flood
+                    await asyncio.sleep(2) # Anti-Flood Wait
                 except Exception as e:
-                    logger.error(f"Delete Error: {e}")
+                    logger.error(f"Batch Delete Error: {e}")
 
-        # Final Cleanup for remaining IDs
+        # Final Deletion (Bache huye IDs)
         if DUPLICATE_IDS:
             await u_bot.delete_messages(chat_id, DUPLICATE_IDS)
             deleted += len(DUPLICATE_IDS)
@@ -121,14 +116,13 @@ async def unequify_handler(bot, message):
             f"{final_status}\n\n"
             f"<b>📊 Final Stats:</b>\n"
             f"• Total Scanned: <code>{total}</code>\n"
-            f"• Duplicates Removed: <code>{deleted}</code>\n\n"
-            f"<i>Channel is now 100% unique!</i>", 
+            f"• Duplicates Removed: <code>{deleted}</code>", 
             reply_markup=get_btns(True)
         )
 
     except Exception as e:
-        logger.error(f"Unequify Error: {e}")
-        await sts_msg.edit(f"<b>❌ Engine Error:</b>\n<code>{e}</code>")
+        logger.error(f"Unequify Engine Error: {e}")
+        await sts_msg.edit(f"<b>❌ Error:</b> <code>{e}</code>")
     
     finally:
         temp.lock[user_id] = False
