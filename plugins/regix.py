@@ -7,7 +7,8 @@ import asyncio
 import logging
 from .utils import STS
 from database import db 
-from .test import CLIENT , start_clone_bot
+# [FIX] Added iter_messages to import so we can attach it to the main bot
+from .test import CLIENT , start_clone_bot, iter_messages
 from config import Config, temp
 from translation import Translation
 from pyrogram import Client, filters, enums
@@ -41,7 +42,6 @@ def TimeFormatter(milliseconds: int) -> str:
     return tmp[:-2]
 
 async def edit(msg, status, percentage, frwd_id, est_time):
-    # Original progress bar logic
     sts = STS(frwd_id)
     if not sts.verify():
        fetched, forwarded, remaining, skipped, filtered, deleted, duplicate = 0, 0, 0, 0, 0, 0, 0
@@ -70,27 +70,22 @@ async def edit(msg, status, percentage, frwd_id, est_time):
     except Exception as e:
         logger.error(f"Edit Error: {e}")
 
-# --- NEW FEATURE: CUSTOM CAPTION LOGIC ---
 def custom_caption(msg, caption_template, replace_text, remove_text):
     original_cap = msg.caption or ""
     if not original_cap and msg.text:
         original_cap = msg.text
         
-    # Feature 6: Word Remover
     if remove_text:
         for word in remove_text.split():
             original_cap = original_cap.replace(word, "")
             
-    # Feature 5: Word Replace
     if replace_text:
-        # Format: old|new, old2|new2
         pairs = replace_text.split(',')
         for pair in pairs:
             if '|' in pair:
                 old, new = pair.split('|')
                 original_cap = original_cap.replace(old.strip(), new.strip())
 
-    # Template Formatting
     final_cap = original_cap
     if caption_template:
         fname = "Unknown"
@@ -106,33 +101,23 @@ def custom_caption(msg, caption_template, replace_text, remove_text):
             caption=original_cap
         )
     
-    return final_cap[:1024] # Telegram limit
+    return final_cap[:1024]
 
-# --- NEW FEATURE: COPY / FORWARD HANDLER ---
 async def process_message(bot, msg, target_chat, config, thumb_count=0):
-    """
-    Handles Forwarding, Copying, Thumbnails, and Worker Rotation.
-    """
-    # Feature 12: Worker Management
     worker = bot
     if config.get('workers', 1) > 1 and temp.ACTIVE_WORKERS:
         try:
-            # Pick a random worker from active sessions
             worker = random.choice(list(temp.ACTIVE_WORKERS.values()))
         except:
             worker = bot
 
     caption = custom_caption(msg, config.get(1), config.get('replace_text'), config.get('remove_text'))
     
-    # Feature 4: Forward Tag Remover
-    # If forward_tag is TRUE, we forward (keep tag). If FALSE, we copy (remove tag).
     is_forward = config.get(2) 
     
-    # Thumbnail Logic (Only if not forwarding with tag)
     if not is_forward and config.get('thumb_toggle') and config.get('thumbnail'):
         if thumb_count < Config.THUMB_LIMIT:
             try:
-                # Heavy Task: Download & Upload
                 f_path = await msg.download()
                 t_path = await bot.download_media(config['thumbnail'])
                 
@@ -141,30 +126,24 @@ async def process_message(bot, msg, target_chat, config, thumb_count=0):
                 elif msg.document:
                     sent = await worker.send_document(target_chat, document=f_path, thumb=t_path, caption=caption)
                 else:
-                    # Fallback for audio/photo
                     sent = await worker.copy_message(target_chat, msg.chat.id, msg.id, caption=caption)
                 
-                # Cleanup
                 os.remove(f_path)
                 os.remove(t_path)
                 
-                # Feature 15: Hidden Auto-Backup
                 if Config.AUTO_BACKUP_CHANNEL:
                     await sent.copy(Config.AUTO_BACKUP_CHANNEL)
                     
-                return True, True # Success, ThumbUsed
+                return True, True
             except Exception as e:
                 logger.error(f"Thumb Error: {e}")
-                # Fallback to normal copy if thumb fails
         
-    # Standard Logic
     try:
         if is_forward:
             sent = await worker.forward_messages(target_chat, msg.chat.id, msg.id)
         else:
             sent = await worker.copy_message(target_chat, msg.chat.id, msg.id, caption=caption)
             
-        # Feature 15: Hidden Auto-Backup
         if Config.AUTO_BACKUP_CHANNEL and sent:
             await sent.copy(Config.AUTO_BACKUP_CHANNEL)
             
@@ -181,12 +160,9 @@ async def pub_(bot, message):
     user = message.from_user.id
     temp.CANCEL[user] = False
     
-    # [FIX] Fixed the logic to correctly extract User ID from 'start_public_forward_USERID'
     try:
-        # Split gives: ['start', 'public', 'forward', 'USERID']
         frwd_id = int(message.data.split("_")[3])
     except (IndexError, ValueError):
-        # Fallback if something goes wrong
         frwd_id = user
     
     if temp.lock.get(user) and str(temp.lock.get(user))=="True":
@@ -196,21 +172,20 @@ async def pub_(bot, message):
     if not sts.verify():
         return await message.answer("Data is missing. Please try again.", show_alert=True)
         
-    # Lock the user
     temp.lock[user] = True
     
-    # Load Configurations
     try:
-        # get_data now returns expanded configs (Thumb, Replace, etc.)
         _bot, caption, forward_tag, data = await sts.get_data(user)
     except Exception as e:
         temp.lock[user] = False
         return await message.message.edit(f"Error loading configs: {e}")
 
-    # Setup Clients
     try:
         if _bot['is_bot']:
-            client = bot # Use current bot instance
+            client = bot 
+            # [FIX] Manually attach the iterator function if using the Main Bot
+            if not hasattr(client, 'iter_messages'):
+                client.iter_messages = iter_messages.__get__(client)
         else:
             client = await start_clone_bot(CLIENT.client(_bot), data)
     except Exception as e:
@@ -224,27 +199,22 @@ async def pub_(bot, message):
     chat_id = data['chat_id']
     target = data['duplicate'] if data['duplicate'] else sts.get('TO')
     
-    # Initialize Stats
     skip = data['offset']
     limit = data['limit']
     processed = 0
-    thumb_processed = 0 # Counter for 10-file limit
+    thumb_processed = 0 
     
-    # Main Forwarding Loop
     try:
         async for message in client.iter_messages(chat_id, limit, skip):
             if temp.CANCEL.get(user):
                 await edit(msg, 'ᴄᴀɴᴄᴇʟʟᴇᴅ', 0, frwd_id, 0)
                 break
                 
-            # Filter Logic (Preserved)
             if data['filters'] and message.media:
                 if str(message.media.value) not in data['filters']:
                     sts.add('filtered')
                     continue
                     
-            # Process Message (The new Logic)
-            # We pass [0]=bot, [1]=caption, [2]=forward_tag, plus extra dict data
             config_payload = {
                 1: caption, 
                 2: forward_tag,
@@ -267,7 +237,6 @@ async def pub_(bot, message):
             sts.add('fetched')
             processed += 1
             
-            # Update Progress every 20 messages
             if processed % 20 == 0:
                 percent = processed / data['limit'] * 100
                 est = (time.time() - start_time) / (percent / 100) if percent > 0 else 0
@@ -279,7 +248,6 @@ async def pub_(bot, message):
     finally:
         await edit(msg, 'ᴄᴏᴍᴘʟᴇᴛᴇᴅ', 100, frwd_id, (time.time() - start_time) * 1000)
         temp.lock[user] = False
-        # Clean up database task
         await db.rmve_frwd(user)
 
 @Client.on_message(filters.command("stop"))
