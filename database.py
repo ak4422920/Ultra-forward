@@ -98,6 +98,8 @@ class Database:
             'replace_text': None, # New: Feature 5 (Word Replace)
             'remove_text': None,  # New: Feature 6 (Word Remover)
             'workers': 1,         # New: Feature 12 (Worker Management)
+            'thumbnail': None,    # New: Custom Thumbnail Storage
+            'thumb_toggle': False, # New: Thumbnail Feature Toggle
             'filters': {
                'poll': True,
                'text': True,
