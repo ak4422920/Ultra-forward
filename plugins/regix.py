@@ -180,7 +180,14 @@ async def process_message(bot, msg, target_chat, config, thumb_count=0):
 async def pub_(bot, message):
     user = message.from_user.id
     temp.CANCEL[user] = False
-    frwd_id = message.data.split("_")[2]
+    
+    # [FIX] Fixed the logic to correctly extract User ID from 'start_public_forward_USERID'
+    try:
+        # Split gives: ['start', 'public', 'forward', 'USERID']
+        frwd_id = int(message.data.split("_")[3])
+    except (IndexError, ValueError):
+        # Fallback if something goes wrong
+        frwd_id = user
     
     if temp.lock.get(user) and str(temp.lock.get(user))=="True":
       return await message.answer("ᴘʟᴇᴀsᴇ ᴡᴀɪᴛ ᴜɴᴛɪʟʟ ᴘʀᴇᴠɪᴏᴜs ᴛᴀsᴋ ᴄᴏᴍᴘʟᴇᴛᴇᴅ.", show_alert=True)
