@@ -1,124 +1,143 @@
-import re
-import asyncio 
-from .utils import STS
+import asyncio
+from pyrogram import Client, filters
+from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from config import Config, temp
 from database import db
-from config import temp, Config
 from translation import Translation
-from pyrogram import Client, filters, enums
-from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
+from .utils import STS
 
-# =================== HELPERS =================== #
-
-def extract_id(text):
-    if not text: return None
-    # Regex to handle links and raw IDs
-    regex = re.compile(r"(https://)?(t\.me/|telegram\.me/|telegram\.dog/)(c/)?(\d+|[a-zA-Z_0-9]+)/(\d+)$")
-    match = regex.match(text.replace("?single", ""))
-    if match:
-        chat_id = match.group(4)
-        if chat_id.isnumeric(): return int(("-100" + chat_id))
-        return chat_id
-    # Raw ID check
-    if text.startswith("-100") or text.isdigit():
-        return text.replace(" ", "")
-    return None
-
-# =================== FORWARD SETUP COMMAND =================== #
-
-@Client.on_message(filters.private & filters.command(["forward", "fwd"]))
-async def run(bot, message):
+@Client.on_message(filters.private & filters.command(["forward"]))
+async def forward(bot, message):
     user_id = message.from_user.id
     
-    # 1. 🤖 Worker Check
-    _bot = await db.get_bot(user_id)
-    if not _bot:
-        return await message.reply("<b>❌ Error:</b>\nAapne koi Worker add nahi kiya hai. Pehle /settings mein jayein.")
+    # Check if user has an active task
+    if temp.lock.get(user_id) and str(temp.lock.get(user_id)) == "True":
+        return await message.reply("**Please wait until previous task completed.**")
     
-    # 2. 🔒 Lock Check
-    if temp.lock.get(user_id):
-        return await message.reply("<b>❌ Error:</b> Ek task pehle se chal raha hai.")
+    # Initialize Status Class for this user
+    sts = STS(user_id)
+    
+    # Check if user has added a bot
+    if not await db.is_bot_exist(user_id):
+        return await message.reply("<b>You didn't add any bot. Please add a bot using /settings !</b>")
 
-    # 3. 📤 Source Selection
-    from_input = await bot.ask(user_id, Translation.FROM_MSG)
-    if from_input.text and from_input.text.startswith('/'):
-        return await message.reply(Translation.CANCEL)
+    # Step 1: Ask for Source Channel
+    await message.reply(Translation.FROM_MSG)
     
-    chat_id = None
-    if from_input.forward_from_chat:
-        chat_id = from_input.forward_from_chat.id
-    else:
-        chat_id = extract_id(from_input.text)
-    
-    if not chat_id:
-        return await message.reply("<b>❌ Invalid Source!</b> Link ya ID sahi nahi hai.")
+    # Listen for Source Input
+    try:
+        source_msg = await bot.listen(chat_id=user_id, timeout=300)
+        
+        if source_msg.text == '/cancel':
+            return await source_msg.reply(Translation.CANCEL)
+        
+        # Determine Source Chat ID and Last Message ID (Limit)
+        if source_msg.forward_from_chat:
+            chat_id = source_msg.forward_from_chat.id
+            limit = source_msg.forward_from_message_id
+        else:
+            # Handle Link input (e.g., https://t.me/channel/1234)
+            if source_msg.text and "https://t.me/" in source_msg.text:
+                try:
+                    parts = source_msg.text.split('/')
+                    # For private channels with -100 ID logic if needed, 
+                    # but usually links give username or ID part
+                    if parts[-2].isdigit(): # /c/12345/123 style
+                         chat_id = int(f"-100{parts[-2]}")
+                    else:
+                         chat_id = parts[-2] # username
+                    limit = int(parts[-1])
+                except:
+                     return await source_msg.reply("<b>Invalid Link Format. Use a valid message link.</b>")
+            else:
+                return await source_msg.reply("<b>Please Forward a message or send a message Link.</b>")
 
-    # 4. 📥 Target Selection
-    configs = await db.get_configs(user_id)
-    saved_targets = configs.get('targets')
-    
-    t_btn = []
-    if saved_targets:
-        # Button logic: Hum callback mein source_id aur saved_targets dono pass karenge
-        t_btn.append([InlineKeyboardButton("🎯 Use Saved Targets", callback_data=f"set_trg_saved_{chat_id}")])
-    t_btn.append([InlineKeyboardButton("❌ Cancel Setup", callback_data="close_btn")])
-    
-    target_prompt = await bot.send_message(
-        user_id, 
-        Translation.TO_MSG + (f"\n\n<b>Saved:</b> <code>{saved_targets}</code>" if saved_targets else ""),
-        reply_markup=InlineKeyboardMarkup(t_btn)
-    )
+        # Step 2: Select Target Channel
+        sts.add('FROM', chat_id)
+        sts.add('limit', limit)
+        
+        # Generate Target Channel Buttons
+        buttons = []
+        user_channels = await db.get_user_channels(user_id)
+        
+        for channel in user_channels:
+            buttons.append([InlineKeyboardButton(
+                text=channel['title'], 
+                callback_data=f"fwd_target#{channel['chat_id']}#{channel['title']}"
+            )])
+            
+        buttons.append([InlineKeyboardButton('• ᴄᴀɴᴄᴇʟ', callback_data='cancel_fwd')])
+        
+        await message.reply(
+            Translation.TO_MSG,
+            reply_markup=InlineKeyboardMarkup(buttons)
+        )
+        
+    except asyncio.exceptions.TimeoutError:
+        await message.reply("<b>Process Timeout. Please start again.</b>")
+    except Exception as e:
+        await message.reply(f"<b>Error:</b> {e}")
 
-    # User ke response ka wait: Ya toh wo ID type karega ya button dabayega
-    # Agar button dabaya toh handle_target (niche wala) function kaam sambhaal lega
-    to_input = await bot.listen(user_id)
-    
-    if to_input.text:
-        if to_input.text.startswith('/'): return
-        target_ids = to_input.text.replace(" ", "")
-        await skip_step(bot, user_id, chat_id, target_ids)
 
-# =================== CALLBACK & STEPS =================== #
-
-@Client.on_callback_query(filters.regex(r'^set_trg_saved_'))
-async def handle_saved_target(bot, query):
+@Client.on_callback_query(filters.regex(r'^fwd_target'))
+async def target_selection(bot, query):
     user_id = query.from_user.id
-    source_id = query.data.split("_")[3]
+    data = query.data.split('#')
+    target_id = int(data[1])
+    target_title = data[2]
     
-    configs = await db.get_configs(user_id)
-    target_ids = configs.get('targets')
+    sts = STS(user_id)
+    
+    # Store Target (For Bulk, we handle 1 target at a time here)
+    # Note: For Multi-Target Live forwarding, use /live command logic
+    sts.add('TO', target_id)
     
     await query.message.delete()
-    await skip_step(bot, user_id, source_id, target_ids)
-
-async def skip_step(bot, user_id, source_id, target_ids):
-    # 5. ⏩ Skip Messages
-    skip_msg = await bot.ask(user_id, Translation.SKIP_MSG)
-    if skip_msg.text and skip_msg.text.startswith('/'): return
     
-    skip_val = int(skip_msg.text) if skip_msg.text.isdigit() else 0
-
-    # 6. 📋 Confirmation UI
-    # STS store karne ke liye hum user_id ko hi forward_id banayenge (Simple & Clean)
-    forward_id = str(user_id)
+    # Step 3: Ask for Skip Count
+    ask_skip = await bot.ask(
+        user_id, 
+        Translation.SKIP_MSG, 
+        filters=filters.text,
+        timeout=300
+    )
     
-    confirm_text = (
-        "<b>📋 ꜰᴏʀᴡᴀʀᴅɪɴɢ sᴇᴛᴜᴘ ʀᴇᴀᴅʏ</b>\n\n"
-        f"<b>📤 Source:</b> <code>{source_id}</code>\n"
-        f"<b>📥 Targets:</b> <code>{target_ids}</code>\n"
-        f"<b>⏩ Skip:</b> <code>{skip_val}</code>\n\n"
-        "<i>Ready to launch?</i>"
+    if ask_skip.text == '/cancel':
+        return await ask_skip.reply(Translation.CANCEL)
+        
+    try:
+        skip_count = int(ask_skip.text)
+    except ValueError:
+        skip_count = 0 # Default to 0 if invalid
+        
+    # Store Final Data
+    # STS.store saves: FROM, TO, skip, limit, etc.
+    # It calculates 'total' as limit - skip
+    sts.store(sts.get('FROM'), target_id, skip_count, sts.get('limit'))
+    
+    # Fetch Data for Confirmation
+    data = sts.get(full=True)
+    bot_data = await db.get_bot(user_id)
+    
+    # Step 4: Double Check Message
+    # Using the Translation template we updated earlier
+    text = Translation.DOUBLE_CHECK.format(
+        botname=bot_data['name'],
+        from_chat=data.FROM,
+        to_chat=target_title,
+        skip=skip_count
+    )
+    
+    buttons = [
+        [InlineKeyboardButton('✅ ʏᴇs, sᴛᴀʀᴛ', callback_data=f'start_public_forward_{user_id}')],
+        [InlineKeyboardButton('❌ ɴᴏ, ᴄᴀɴᴄᴇʟ', callback_data='cancel_fwd')]
+    ]
+    
+    await ask_skip.reply(
+        text,
+        reply_markup=InlineKeyboardMarkup(buttons)
     )
 
-    buttons = [[
-        InlineKeyboardButton('🚀 Start Now', callback_data=f"start_public_{forward_id}"),
-        InlineKeyboardButton('❌ Cancel', callback_data="close_btn")
-    ]]
-
-    # Store in memory BEFORE showing start button
-    STS(forward_id).store(source_id, target_ids, skip_val, 0)
-    
-    await bot.send_message(user_id, text=confirm_text, reply_markup=InlineKeyboardMarkup(buttons))
-
-@Client.on_callback_query(filters.regex(r'^close_btn'))
-async def close_callback(bot, query):
-    await query.message.delete()
+@Client.on_callback_query(filters.regex('^cancel_fwd'))
+async def cancel_fwd(bot, query):
+    await query.message.edit(Translation.CANCEL)
